@@ -494,6 +494,11 @@ def refresh_all(conn, years: list[str], terms: list[str] | None = None, *,
 
     run_id = db.start_run(conn, [p["term"] for p in plan])
     year_terms = [(p["year"], p["term"]) for p in plan]
+    # A catalog rebuild deletes and recreates class rows. Preserve the last
+    # cart values when this pass deliberately excludes cart collection, so an
+    # hourly full update cannot erase the newest bounded-window observation.
+    saved_carts = (db.snapshot_cart_counts(conn, year_terms)
+                   if not collect_cart else {})
     total_classes = total_slots = total_timeless = total_recovered = 0
     try:
         # Snapshot the OLD rows before the wipe so we can diff after the rebuild.
@@ -514,6 +519,8 @@ def refresh_all(conn, years: list[str], terms: list[str] | None = None, *,
             total_slots += stats["slots"]
             total_timeless += stats["timeless"]
             total_recovered += stats["recovered"]
+        if saved_carts:
+            db.restore_cart_counts(conn, saved_carts)
         db.finish_run(conn, run_id, "done", "ok", total_classes, total_slots)
     except Exception as e:  # noqa: BLE001 - record failure for the admin UI
         db.finish_run(conn, run_id, "error", str(e), total_classes, total_slots)

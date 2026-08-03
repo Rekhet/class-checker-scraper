@@ -403,6 +403,36 @@ def update_counts(conn: sqlite3.Connection, year: str, shtm_fg: str,
     return cur.rowcount > 0
 
 
+def snapshot_cart_counts(conn: sqlite3.Connection, year_terms) -> dict[tuple, int | None]:
+    """Capture cart values by stable class identity before a catalog rebuild."""
+    saved = {}
+    for year, term in year_terms:
+        rows = conn.execute(
+            "SELECT year, shtm_fg, deta_shtm_fg, sbjt_cd, lt_no, subh_cd, cart "
+            "FROM classes WHERE year=? AND term=?",
+            (year, term),
+        ).fetchall()
+        for row in rows:
+            saved[(row["year"], row["shtm_fg"], row["deta_shtm_fg"],
+                  row["sbjt_cd"], row["lt_no"], row["subh_cd"])] = row["cart"]
+    return saved
+
+
+def restore_cart_counts(conn: sqlite3.Connection, saved: dict[tuple, int | None]) -> int:
+    """Restore captured cart values onto matching rows recreated by a rebuild."""
+    if not saved:
+        return 0
+    cur = conn.executemany(
+        "UPDATE classes SET cart=? WHERE year=? AND shtm_fg=? AND deta_shtm_fg=? "
+        "AND sbjt_cd=? AND lt_no=? AND subh_cd=?",
+        [(cart, year, shtm_fg, deta_shtm_fg, sbjt_cd, lt_no, subh_cd)
+         for (year, shtm_fg, deta_shtm_fg, sbjt_cd, lt_no, subh_cd), cart
+         in saved.items()],
+    )
+    conn.commit()
+    return cur.rowcount
+
+
 def apply_grading(conn: sqlite3.Connection, year: str, term: str,
                   methods: dict[tuple, str], switchable: set[tuple]) -> int:
     """Overlay the 평가방식 sweep results onto one term's rows. `methods` maps

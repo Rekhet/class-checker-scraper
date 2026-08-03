@@ -118,6 +118,66 @@ class CountsPipelineTests(unittest.TestCase):
                 ).fetchone()
                 self.assertEqual(tuple(row), (99, 99, 99, 7))
 
+    def test_catalog_rebuild_can_restore_existing_cart_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._connection_with_class(Path(tmp) / "test.db") as conn:
+                saved = db.snapshot_cart_counts(conn, [("2026", "fall")])
+                conn.execute("DELETE FROM classes")
+                conn.execute(
+                    """INSERT INTO classes
+                       (term, year, shtm_fg, deta_shtm_fg, sbjt_cd, lt_no,
+                        subh_cd, name, quota, applied, cart, enrolled)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    ("fall", "2026", "fall", "", "C101", "001", "000",
+                     "재생성", 30, 99, None, 99),
+                )
+                conn.commit()
+
+                restored = db.restore_cart_counts(conn, saved)
+
+                row = conn.execute("SELECT cart FROM classes").fetchone()
+                self.assertEqual(restored, 1)
+                self.assertEqual(row[0], 7)
+
+    def test_full_catalog_pass_preserves_cart_when_cart_is_not_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._connection_with_class(Path(tmp) / "test.db") as conn:
+                client = type(
+                    "Client",
+                    (),
+                    {"fetch_terms": lambda *_args: [{
+                        "year": "2026", "term": "fall", "label": "2026 2학기"
+                    }]},
+                )()
+
+                def rebuild(conn, _client, _year, _term, **_kwargs):
+                    db.upsert_class(conn, {
+                        "year": "2026", "shtm_fg": "fall", "deta_shtm_fg": "",
+                        "sbjt_cd": "C101", "lt_no": "001", "subh_cd": "000",
+                        "name": "재생성", "slots": [], "cart": None,
+                    })
+                    return {"classes": 1, "slots": 0, "timeless": 0,
+                            "recovered": 0, "counts_updated": 0,
+                            "grading_tagged": 0}
+
+                with patch.object(crawl, "SnuClient", return_value=client), \
+                     patch.object(crawl, "crawl_term", side_effect=rebuild), \
+                     patch.object(crawl.changelog, "diff", return_value=([], {
+                         "new": 0, "removed": 0, "changed": 0, "codes": {}
+                     })), \
+                     patch.object(crawl.changelog, "write_run_log", return_value=None):
+                    crawl.refresh_all(
+                        conn,
+                        ["2026"],
+                        terms=["fall"],
+                        live_counts=False,
+                        collect_grading=False,
+                        search_timing=False,
+                    )
+
+                row = conn.execute("SELECT cart FROM classes").fetchone()
+                self.assertEqual(row[0], 7)
+
     def test_collection_argument_selects_components(self) -> None:
         args = crawl.parse_args([
             "--years", "2026",
