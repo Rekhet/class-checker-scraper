@@ -44,6 +44,7 @@ Usage: $0 [options] <semester...>
              'all' expands to every semester.
 
   options
+    --collect COMPONENTS  comma-separated catalog,enrollment,cart,grading (or all)
     --year YYYY          year to crawl (REQUIRED; repeatable or comma-list,
                          or env YEAR=; e.g. --year 2025 --year 2026
                          or --year 2025,2026)
@@ -66,6 +67,7 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --collect)           EXTRA+=("$1" "$2"); shift 2;;
     --year)            IFS=', ' read -r -a _y <<< "$2"; years+=("${_y[@]}"); shift 2;;
     --counts-only|--cart-only|--windowed|--no-counts|--no-search-timing|--force)
                        EXTRA+=("$1"); shift;;

@@ -114,9 +114,25 @@ def _forced_windows() -> dict:
     return {"collect_cart": False, "collect_enrolled": True}
 
 
-def _window_active(*, cart_only: bool = False) -> bool:
+def _sample_options(*, collect_cart: bool, collect_enrollment: bool,
+                    force: bool) -> dict:
+    """Return sampling switches after applying the selected collectors."""
+    options = _forced_windows() if force else _sample_windows()
+    options["collect_cart"] = bool(options["collect_cart"] and collect_cart)
+    options["collect_enrolled"] = bool(
+        options["collect_enrolled"] and collect_enrollment
+    )
+    # Applied is paired with the enrollment collector. A cart-only pass must
+    # never turn the applied value from the same search response into a sample.
+    options["collect_applied"] = bool(collect_enrollment)
+    return options
+
+
+def _window_active(*, collect_cart: bool = True,
+                   collect_enrollment: bool = True) -> bool:
     windows = _sample_windows()
-    return windows["collect_cart"] if cart_only else any(windows.values())
+    return ((collect_cart and windows["collect_cart"])
+            or (collect_enrollment and windows["collect_enrolled"]))
 
 AJAX_URL = f"{snu_session.BASE}/sugang/cc/cc100ajax.action"
 SEARCH_URL = snu_session.SEARCH_URL
@@ -128,6 +144,32 @@ SEED_SHTM = "U000200002U000300001"
 # yet, e.g. fall). Above it, the Excel-time-less classes are genuinely time-less.
 SEARCH_TIMING_MAX_RATIO = 0.5
 ProgressFn = Callable[[dict], None]
+
+# The CLI and scheduled wrappers use these names as the stable collection
+# contract. A single live search pass can update either or both volatile metric
+# groups, so selecting both never requires two duplicate requests.
+COLLECTION_COMPONENTS = frozenset(("catalog", "enrollment", "cart", "grading"))
+LIVE_COMPONENTS = frozenset(("enrollment", "cart"))
+
+
+def parse_collection_spec(values: str | list[str]) -> frozenset[str]:
+    """Parse one or more comma-separated collection component names."""
+    if isinstance(values, str):
+        values = [values]
+    names = [name.strip().lower() for value in values for name in value.split(",")]
+    names = [name for name in names if name]
+    if not names:
+        raise ValueError("collection selection cannot be empty")
+    if "all" in names:
+        if len(names) != 1:
+            raise ValueError("all cannot be combined with other collection components")
+        return COLLECTION_COMPONENTS
+    unknown = sorted(set(names) - COLLECTION_COMPONENTS)
+    if unknown:
+        choices = ", ".join(sorted(COLLECTION_COMPONENTS))
+        raise ValueError(f"unknown collection component(s): {', '.join(unknown)}; "
+                         f"choose from {choices}")
+    return frozenset(names)
 
 
 def _search_form(year: str, term: str, *, page: int = 1, page_size: int = 9999,
@@ -201,12 +243,22 @@ class SnuClient:
 
 def refresh_counts(conn, client: SnuClient, year: str, term: str, *,
                    label: str = "", progress: ProgressFn | None = None,
-                   cart_only: bool = False) -> dict:
-    """Paginate the term search and overlay live volatile columns.
+                   collect_cart: bool = True, collect_enrollment: bool = True,
+                   cart_only: bool | None = None) -> dict:
+    """Paginate one search response and update the selected live metrics.
 
-    ``cart_only`` intentionally updates only ``classes.cart``. The normal
-    counts pass keeps the historical applied/quota/enrolled behavior.
+    ``cart_only`` remains as a compatibility alias for callers using the old
+    internal API. New callers should select ``collect_cart`` and
+    ``collect_enrollment`` explicitly; both are applied in this one search
+    pass when selected.
     """
+    if cart_only is not None:
+        collect_cart = True
+        collect_enrollment = not cart_only
+    if not collect_cart and not collect_enrollment:
+        return {"term": term, "fetched": 0, "updated": 0,
+                "skipped": "no live metrics selected"}
+
     fetched: list[dict] = []
     page = 1
     while True:
@@ -223,8 +275,10 @@ def refresh_counts(conn, client: SnuClient, year: str, term: str, *,
 
     updated = 0
     for c in fetched:
-        kwargs = {"cart": c.get("cart")}
-        if not cart_only:
+        kwargs = {}
+        if collect_cart:
+            kwargs["cart"] = c.get("cart")
+        if collect_enrollment:
             kwargs.update(applied=c.get("applied"), quota=c.get("quota"),
                           enrolled=c.get("enrolled"))
         if db.update_counts(conn, year, c["shtm_fg"], c["deta_shtm_fg"],
@@ -346,11 +400,14 @@ def _search_times(client: SnuClient, year: str, term: str, *,
 
 def crawl_term(conn, client: SnuClient, year: str, term: str, *,
                label: str = "", live_counts: bool = True,
+               collect_cart: bool = True, collect_enrollment: bool = True,
+               collect_grading: bool = True,
                search_timing: bool = True,
                progress: ProgressFn | None = None) -> dict:
     """Rebuild one term from its Excel (catalog + exact slots). Where the Excel has
-    no time (it lags), recover timing from the live search results. Then overlay live
-    enrollment counts. Excel timing always overrides the search-derived timing."""
+    no time (it lags), recover timing from the live search results. Then overlay
+    the selected live metrics. Excel timing always overrides the search-derived
+    timing."""
     db.upsert_term(conn, term, year, label or f"{year} {term}")
     if progress:
         progress({"phase": "excel", "term": term, "label": label,
@@ -394,20 +451,23 @@ def crawl_term(conn, client: SnuClient, year: str, term: str, *,
         conn.commit()
 
     counts = {"fetched": 0, "updated": 0}
-    if live_counts:
+    if live_counts and (collect_cart or collect_enrollment):
         try:
             counts = refresh_counts(conn, client, year, term,
-                                    label=label, progress=progress)
+                                    label=label, progress=progress,
+                                    collect_cart=collect_cart,
+                                    collect_enrollment=collect_enrollment)
         except Exception as e:  # noqa: BLE001 - counts are best-effort, Excel already landed
             counts = {"fetched": 0, "updated": 0, "error": str(e)}
     # 평가방식 tags are wiped with the rows on every rebuild, so re-sweep them here.
     # Best-effort like counts: a sweep failure must not fail an otherwise good crawl.
     grading = {"tagged": 0}
-    try:
-        grading = refresh_grading(conn, client, year, term,
-                                  label=label, progress=progress)
-    except Exception as e:  # noqa: BLE001
-        grading = {"tagged": 0, "error": str(e)}
+    if collect_grading:
+        try:
+            grading = refresh_grading(conn, client, year, term,
+                                      label=label, progress=progress)
+        except Exception as e:  # noqa: BLE001
+            grading = {"tagged": 0, "error": str(e)}
     return {"term": term, "classes": classes, "slots": slot_rows,
             "timeless": timeless, "recovered": recovered,
             "counts_updated": counts["updated"],
@@ -417,10 +477,15 @@ def crawl_term(conn, client: SnuClient, year: str, term: str, *,
 def refresh_all(conn, years: list[str], terms: list[str] | None = None, *,
                 mint: Callable[[], dict] = snu_session.mint_session,
                 live_counts: bool = True, search_timing: bool = True,
-                force: bool = False, progress: ProgressFn | None = None) -> dict:
+                force: bool = False, progress: ProgressFn | None = None,
+                collect_cart: bool = True, collect_enrollment: bool = True,
+                collect_grading: bool = True) -> dict:
     """Wipe and rebuild the given (year, term) catalogs from their Excel exports,
     recover missing timing from search results, then overlay live counts. Other
     semesters are left intact."""
+    if not live_counts:
+        collect_cart = False
+        collect_enrollment = False
     client = SnuClient(mint=mint)
     wanted = set(terms or [])
     plan: list[dict] = []
@@ -442,6 +507,9 @@ def refresh_all(conn, years: list[str], terms: list[str] | None = None, *,
                 progress({"phase": "term-start", "term": p["term"], "label": p["label"]})
             stats = crawl_term(conn, client, p["year"], p["term"],
                                label=p["label"], live_counts=live_counts,
+                               collect_cart=collect_cart,
+                               collect_enrollment=collect_enrollment,
+                               collect_grading=collect_grading,
                                search_timing=search_timing,
                                progress=progress)
             total_classes += stats["classes"]
@@ -464,7 +532,9 @@ def refresh_all(conn, years: list[str], terms: list[str] | None = None, *,
         log.exception("update run %s: change log failed", run_id)
     try:
         db.sample_counts(conn, year_terms,
-                         **(_forced_windows() if force else _sample_windows()))   # 인원 추이 sample
+                         **_sample_options(collect_cart=collect_cart,
+                                           collect_enrollment=collect_enrollment,
+                                           force=force))   # 인원 추이 sample
         if force:
             for (y, t) in year_terms:
                 db.mark_closed(conn, y, t)
@@ -479,14 +549,23 @@ def refresh_all(conn, years: list[str], terms: list[str] | None = None, *,
 def refresh_counts_all(conn, years: list[str], terms: list[str] | None = None, *,
                        mint: Callable[[], dict] = snu_session.mint_session,
                        force: bool = False, progress: ProgressFn | None = None,
-                       cart_only: bool = False, windowed: bool = False) -> dict:
+                       collect_cart: bool = True, collect_enrollment: bool = True,
+                       cart_only: bool | None = None,
+                       windowed: bool = False) -> dict:
     """Counts-only pass for the fast timer: no Excel download, just re-poll the
     search endpoint per stored term and overlay live counts.
 
     A windowed pass exits before creating a session when its configured metric
     window is inactive. This keeps a generic timer from polling SNU off-season.
     """
-    if windowed and not _window_active(cart_only=cart_only):
+    if cart_only is not None:
+        collect_cart = True
+        collect_enrollment = not cart_only
+    if not collect_cart and not collect_enrollment:
+        return {"updated": 0, "samples": 0, "terms": [],
+                "skipped": "no live metrics selected"}
+    if windowed and not _window_active(collect_cart=collect_cart,
+                                      collect_enrollment=collect_enrollment):
         return {"updated": 0, "samples": 0, "terms": [],
                 "skipped": "outside collection window"}
     client = SnuClient(mint=mint)
@@ -497,13 +576,15 @@ def refresh_counts_all(conn, years: list[str], terms: list[str] | None = None, *
     for p in plan:
         out = refresh_counts(conn, client, p["year"], p["term"],
                              label=p["label"], progress=progress,
-                             cart_only=cart_only)
+                             collect_cart=collect_cart,
+                             collect_enrollment=collect_enrollment)
         total += out["updated"]
     # append one enrollment sample per class for the 인원 추이 time-series
     samples = 0
     try:
-        sample_kwargs = _forced_windows() if force else _sample_windows()
-        sample_kwargs["collect_applied"] = not cart_only
+        sample_kwargs = _sample_options(collect_cart=collect_cart,
+                                        collect_enrollment=collect_enrollment,
+                                        force=force)
         samples = db.sample_counts(conn, [(p["year"], p["term"]) for p in plan],
                                    **sample_kwargs)
         if force:   # forced = past semester captured -> mark it closed (마감)
@@ -542,6 +623,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Crawl SNU sugang into the DB")
     ap.add_argument("--years", default="2026")
     ap.add_argument("--terms", default="", help="comma cmmnCd subset; blank=all")
+    ap.add_argument(
+        "--collect",
+        action="append",
+        metavar="COMPONENTS",
+        help="comma-separated components: catalog, enrollment, cart, grading, or all; "
+             "may be repeated",
+    )
     ap.add_argument("--counts-only", action="store_true",
                     help="skip Excel, only refresh live enrollment counts")
     ap.add_argument("--cart-only", action="store_true",
@@ -566,12 +654,36 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def parse_args(argv: list[str] | None = None):
     ap = build_arg_parser()
     args = ap.parse_args(argv)
+    legacy_mode = (args.counts_only or args.cart_only or args.grading_only
+                   or args.no_counts)
+    if args.collect is not None and legacy_mode:
+        ap.error("--collect cannot be combined with legacy mode flags")
+
+    if args.collect is not None:
+        try:
+            selected = parse_collection_spec(args.collect)
+        except ValueError as exc:
+            ap.error(str(exc))
+    elif args.grading_only:
+        selected = frozenset(("grading",))
+    elif args.counts_only:
+        selected = frozenset(("cart",)) if args.cart_only else LIVE_COMPONENTS
+    else:
+        selected = COLLECTION_COMPONENTS
+        if args.no_counts:
+            selected = selected - LIVE_COMPONENTS
+
     if args.cart_only and not args.counts_only:
         ap.error("--cart-only requires --counts-only")
-    if args.windowed and not args.counts_only:
+    if args.windowed and args.collect is None and not args.counts_only:
         ap.error("--windowed requires --counts-only")
+    if args.windowed and not selected <= LIVE_COMPONENTS:
+        ap.error("--windowed can only be used with enrollment/cart collection")
     if args.cart_only and args.force:
         ap.error("--cart-only cannot be combined with --force")
+    if args.collect is not None and args.force and "cart" in selected:
+        ap.error("--force cannot be combined with explicit cart collection")
+    args.collections = frozenset(selected)
     return args
 
 
@@ -603,17 +715,50 @@ def main(argv: list[str] | None = None) -> int:
                     else:
                         print(f"이미 마감된 학기: {msg}. 재수집하려면 --yes 를 붙이세요. 취소.", file=sys.stderr)
                         return 1
-            if args.grading_only:
-                out = refresh_grading_all(conn, years, terms=terms, progress=prog)
-            elif args.counts_only:
+            selected = args.collections
+            live = selected & LIVE_COMPONENTS
+            if "catalog" in selected:
+                out = refresh_all(
+                    conn,
+                    years,
+                    terms=terms,
+                    live_counts=bool(live),
+                    collect_cart="cart" in live,
+                    collect_enrollment="enrollment" in live,
+                    collect_grading="grading" in selected,
+                    search_timing=not args.no_search_timing,
+                    force=args.force,
+                    progress=prog,
+                )
+            elif live and "grading" in selected:
+                out = {
+                    "counts": refresh_counts_all(
+                        conn,
+                        years,
+                        terms=terms,
+                        force=args.force,
+                        progress=prog,
+                        collect_cart="cart" in live,
+                        collect_enrollment="enrollment" in live,
+                        windowed=args.windowed,
+                    ),
+                    "grading": refresh_grading_all(
+                        conn, years, terms=terms, progress=prog
+                    ),
+                }
+            elif live:
                 out = refresh_counts_all(
-                    conn, years, terms=terms, force=args.force, progress=prog,
-                    cart_only=args.cart_only, windowed=args.windowed)
+                    conn,
+                    years,
+                    terms=terms,
+                    force=args.force,
+                    progress=prog,
+                    collect_cart="cart" in live,
+                    collect_enrollment="enrollment" in live,
+                    windowed=args.windowed,
+                )
             else:
-                out = refresh_all(conn, years, terms=terms,
-                                  live_counts=not args.no_counts,
-                                  search_timing=not args.no_search_timing,
-                                  force=args.force, progress=prog)
+                out = refresh_grading_all(conn, years, terms=terms, progress=prog)
             print("DONE:", out)
             return 0
         finally:

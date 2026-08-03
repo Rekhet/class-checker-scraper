@@ -115,7 +115,8 @@ class PublishScriptTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(make_log.read_text(encoding="utf-8").strip(),
-                             "refresh YEAR=2099 SEM=spring")
+                             "refresh YEAR=2099 SEM=spring "
+                             "COLLECT=catalog,enrollment,grading")
 
 
 if __name__ == "__main__":

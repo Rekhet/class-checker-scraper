@@ -11,6 +11,7 @@ export TURSO_DATABASE_URL ?= data/turso.db
 #   make refresh YEAR=2026 SEM="spring fall"
 SEM ?=
 export YEAR ?=
+COLLECT ?=
 
 # Production (Turso cloud) credentials: prod.env = READ-ONLY (web tier),
 # prod-admin.env = READ-WRITE (migrate/refresh/flush). Both chmod 600, never committed.
@@ -25,8 +26,8 @@ dev:             ## run via uv (with dev/admin panels):  make dev PORT=9000
 serve:           ## launch on Turso (with dev/admin panels):  make serve PORT=9000
 	@WEB_INDEX=index-dev.html ./serve.sh
 
-refresh:         ## refresh:  make refresh YEAR=2026 SEM="fall"
-	@./refresh.sh $(SEM)
+refresh:         ## refresh:  make refresh YEAR=2026 SEM="fall" [COLLECT=catalog,enrollment,grading]
+	@./refresh.sh $(if $(COLLECT),--collect "$(COLLECT)") $(SEM)
 
 refresh-counts:  ## counts-only:  make refresh-counts YEAR=2026 SEM="fall"
 	@./refresh.sh --counts-only $(SEM)

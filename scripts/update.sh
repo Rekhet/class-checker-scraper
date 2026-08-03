@@ -16,15 +16,22 @@ if [ -f "$ROOT/collect.env" ]; then
 fi
 UPDATE_YEAR="${UPDATE_YEAR:-${COUNT_YEAR:-}}"
 UPDATE_SEM="${UPDATE_SEM:-${COUNT_SEM:-}}"
+UPDATE_COLLECTIONS="${UPDATE_COLLECTIONS:-catalog,enrollment,grading}"
 if [ -z "$UPDATE_YEAR" ] || [ -z "$UPDATE_SEM" ]; then
   echo "error: set UPDATE_YEAR/UPDATE_SEM or COUNT_YEAR/COUNT_SEM in collect.env" >&2
   exit 2
 fi
+case ",$UPDATE_COLLECTIONS," in
+  *,cart,*)
+    echo "error: full update cannot collect cart; use the bounded cart worker" >&2
+    exit 2
+    ;;
+esac
 
 if [ "${CLASS_CHECKER_PROCESS_LOCK_HELD:-}" != "1" ]; then
   exec "$PY" -m scraper.process_lock --timeout "${CRAWL_LOCK_TIMEOUT:-900}" -- "$0" "$@"
 fi
 
-make refresh YEAR="$UPDATE_YEAR" SEM="$UPDATE_SEM"
+make refresh YEAR="$UPDATE_YEAR" SEM="$UPDATE_SEM" COLLECT="$UPDATE_COLLECTIONS"
 PUBLISH_COMMIT_MESSAGE="${PUBLISH_COMMIT_MESSAGE:-chore(data): update}" \
   "$ROOT/scripts/publish.sh" full

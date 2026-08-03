@@ -90,6 +90,62 @@ class CountsPipelineTests(unittest.TestCase):
                 ).fetchone()
                 self.assertEqual(tuple(row), (12, 30, 4, 21))
 
+    def test_enrollment_refresh_does_not_update_cart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._connection_with_class(Path(tmp) / "test.db") as conn:
+                response = {
+                    "total": 1,
+                    "page_count": 0,
+                    "classes": [{
+                        "shtm_fg": "fall", "deta_shtm_fg": "", "sbjt_cd": "C101",
+                        "lt_no": "001", "subh_cd": "000", "applied": 99,
+                        "quota": 99, "enrolled": 99, "cart": 21,
+                    }],
+                }
+
+                with patch.object(crawl.parse, "parse_response", return_value=response):
+                    crawl.refresh_counts(
+                        conn,
+                        type("Client", (), {"search_page": lambda *_args, **_kwargs: ""})(),
+                        "2026",
+                        "fall",
+                        collect_cart=False,
+                        collect_enrollment=True,
+                    )
+
+                row = conn.execute(
+                    "SELECT applied, quota, enrolled, cart FROM classes"
+                ).fetchone()
+                self.assertEqual(tuple(row), (99, 99, 99, 7))
+
+    def test_collection_argument_selects_components(self) -> None:
+        args = crawl.parse_args([
+            "--years", "2026",
+            "--terms", "fall",
+            "--collect", "catalog,enrollment,grading",
+        ])
+
+        self.assertEqual(
+            args.collections,
+            frozenset({"catalog", "enrollment", "grading"}),
+        )
+
+    def test_collection_sample_options_can_exclude_cart(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"CART_WINDOWS": "2026-08-04", "ENROLL_WINDOWS": "2026-08-04"},
+            clear=False,
+        ), patch.object(crawl, "_today_iso", return_value="2026-08-04"):
+            options = crawl._sample_options(
+                collect_cart=False,
+                collect_enrollment=True,
+                force=False,
+            )
+
+        self.assertFalse(options["collect_cart"])
+        self.assertTrue(options["collect_enrolled"])
+        self.assertTrue(options["collect_applied"])
+
     def test_cart_only_and_windowed_flags_are_counts_only_modes(self) -> None:
         args = crawl.parse_args([
             "--years", "2026",
@@ -101,6 +157,16 @@ class CountsPipelineTests(unittest.TestCase):
         self.assertTrue(args.counts_only)
         self.assertTrue(args.cart_only)
         self.assertTrue(args.windowed)
+
+    def test_windowed_collection_accepts_explicit_cart_component(self) -> None:
+        args = crawl.parse_args([
+            "--years", "2026",
+            "--terms", "fall",
+            "--collect", "cart",
+            "--windowed",
+        ])
+
+        self.assertEqual(args.collections, frozenset({"cart"}))
 
     def test_windowed_cart_pass_skips_before_minting_a_session(self) -> None:
         with patch.dict(
