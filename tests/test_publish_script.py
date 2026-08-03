@@ -118,6 +118,42 @@ class PublishScriptTests(unittest.TestCase):
                              "refresh YEAR=2099 SEM=spring "
                              "COLLECT=catalog,enrollment,grading")
 
+            env["UPDATE_COLLECTIONS"] = "cart"
+            blocked = subprocess.run(
+                ["bash", str(scripts / "update.sh")],
+                cwd=project,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(blocked.returncode, 2)
+            self.assertIn("cannot collect cart", blocked.stderr)
+            self.assertEqual(make_log.read_text(encoding="utf-8").strip(),
+                             "refresh YEAR=2099 SEM=spring "
+                             "COLLECT=catalog,enrollment,grading")
+
+    def test_cart_wrapper_dry_run_selects_only_cart(self) -> None:
+        env = os.environ.copy()
+        env.update({
+            "CLASS_CHECKER_PROCESS_LOCK_HELD": "1",
+            "DRY_RUN": "1",
+            "COUNT_YEAR": "2099",
+            "COUNT_SEM": "fall",
+            "COUNT_MODE": "cart",
+        })
+        result = subprocess.run(
+            ["bash", str(ROOT / "scripts/update-counts.sh")],
+            cwd=ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--collect cart --windowed fall", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

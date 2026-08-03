@@ -8,15 +8,15 @@ Two sources, two cadences:
   It is downloaded once and then on a timer — it LAGS on enrollment, so we never
   trust its counts.
 * Search (cc100InterfaceSrch.action) is queried per term and paginated to refresh
-  ONLY the volatile enrollment numbers (수강신청인원/applied, 정원/quota,
+  the selected volatile numbers (수강신청인원/applied, 정원/quota,
   장바구니/cart, 총수강인원/enrolled) that the live UI updates immediately.
   These overlay the stale Excel counts; everything else (identity, timing,
-  professor, credits) stays as the Excel wrote it. A cart-only pass narrows this
-  overlay to cart and its trend sample.
+  professor, credits) stays as the Excel wrote it. Selecting cart and enrollment
+  together still uses one search pass per term.
 
 So: Excel timing/catalog overrides; when Excel is missing/empty the search data is
-what we have. crawl_term() runs Excel then the count overlay; refresh_counts_all()
-does a counts-only pass for the fast timer between Excel rebuilds.
+what we have. crawl_term() runs the selected catalog, live-metric, and grading
+steps; refresh_counts_all() does a selected live-metric pass between rebuilds.
 """
 from __future__ import annotations
 
@@ -480,9 +480,7 @@ def refresh_all(conn, years: list[str], terms: list[str] | None = None, *,
                 force: bool = False, progress: ProgressFn | None = None,
                 collect_cart: bool = True, collect_enrollment: bool = True,
                 collect_grading: bool = True) -> dict:
-    """Wipe and rebuild the given (year, term) catalogs from their Excel exports,
-    recover missing timing from search results, then overlay live counts. Other
-    semesters are left intact."""
+    """Rebuild the selected terms and run the selected catalog/live/grading steps."""
     if not live_counts:
         collect_cart = False
         collect_enrollment = False
@@ -552,8 +550,8 @@ def refresh_counts_all(conn, years: list[str], terms: list[str] | None = None, *
                        collect_cart: bool = True, collect_enrollment: bool = True,
                        cart_only: bool | None = None,
                        windowed: bool = False) -> dict:
-    """Counts-only pass for the fast timer: no Excel download, just re-poll the
-    search endpoint per stored term and overlay live counts.
+    """Live-metric pass for the fast timer: no Excel download, just re-poll the
+    search endpoint per stored term and overlay the selected metrics.
 
     A windowed pass exits before creating a session when its configured metric
     window is inactive. This keeps a generic timer from polling SNU off-season.

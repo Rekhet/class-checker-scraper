@@ -5,7 +5,8 @@ Description=SNU Class Checker cart/trend update
 Type=oneshot
 WorkingDirectory=%h/project/class-checker
 # Scope, mode, timezone, and collection windows are sourced from collect.env by
-# the entry point. This unit intentionally contains no semester-specific values.
+# the entry point. COUNT_MODE=cart maps to --collect cart; COUNT_MODE=counts
+# maps to --collect cart,enrollment. This unit contains no semester-specific values.
 Environment=CRAWL_LOCK_TIMEOUT=900
 ExecStart=%h/project/class-checker/scripts/update-counts.sh
 TimeoutStartSec=20min

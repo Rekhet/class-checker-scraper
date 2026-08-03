@@ -1,0 +1,7 @@
+[Unit]
+Description=SNU Class Checker data update
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/project/class-checker
+ExecStart=%h/project/class-checker/scripts/update.sh

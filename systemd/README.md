@@ -8,25 +8,43 @@ term or publish over another update.
 Install or refresh the user units with:
 
 ```sh
+install -Dm644 systemd/class-checker.update.service \
+  "$HOME/.config/systemd/user/class-checker.update.service"
+install -Dm644 systemd/class-checker.update.timer \
+  "$HOME/.config/systemd/user/class-checker.update.timer"
 install -Dm644 systemd/class-checker.update-counts.service \
   "$HOME/.config/systemd/user/class-checker.update-counts.service"
 install -Dm644 systemd/class-checker.update-counts.timer \
   "$HOME/.config/systemd/user/class-checker.update-counts.timer"
 systemctl --user daemon-reload
-systemctl --user enable --now class-checker.update-counts.timer
+systemctl --user enable --now class-checker.update.timer
 ```
 
-The timer is deliberately broad on weekdays during 09:00–20:50. The
+The legacy counts timer is deliberately broad on weekdays during 09:00–20:50. The
 `--windowed` pass checks `collect.env` before opening a SNU session, so it is
 inactive outside the configured cart/enrollment windows. Change `COUNT_MODE`
-to `counts` in `collect.env` when the same cadence should collect both live count
-metrics. `COUNT_YEAR`, `COUNT_SEM`, `COUNT_MODE`, `COLLECTION_TIMEZONE`, and the
-`*_WINDOWS` values in `collect.env` are the canonical runtime configuration; edit
-that file for a future semester, then run `systemctl --user daemon-reload`.
+to `counts` in `collect.env` when the same cadence should collect both live
+metric groups. The preferred interface is the crawler's explicit
+`--collect` selection:
+
+```text
+catalog     Excel catalog and timing rebuild
+enrollment  live applied/quota/enrolled overlay and enrollment samples
+cart        live 장바구니 overlay and cart samples
+grading     평가방식/전환가능여부 sweep
+```
+
+The scheduled full update uses `catalog,enrollment,grading`; it deliberately
+excludes `cart`. The bounded worker uses `cart`. When both live groups are
+selected, they share one search pass and do not issue duplicate count requests.
+`COUNT_YEAR`, `COUNT_SEM`, `COUNT_MODE`, `COLLECTION_TIMEZONE`, and the
+`*_WINDOWS` values in `collect.env` remain the canonical runtime configuration;
+edit that file for a future semester, then run `systemctl --user daemon-reload`.
 
 The full-update wrapper reads `COUNT_YEAR` and `COUNT_SEM` from the same file.
-For an intentional one-off full refresh, `UPDATE_YEAR` and `UPDATE_SEM` may
-override them without changing the canonical configuration.
+For an intentional one-off full refresh, `UPDATE_YEAR`, `UPDATE_SEM`, and
+`UPDATE_COLLECTIONS` may override them. `UPDATE_COLLECTIONS` is fail-closed if
+it includes `cart`; cart collection belongs to the bounded worker.
 
 ## Bounded two-day cart collection
 

@@ -17,12 +17,17 @@ fi
 UPDATE_YEAR="${UPDATE_YEAR:-${COUNT_YEAR:-}}"
 UPDATE_SEM="${UPDATE_SEM:-${COUNT_SEM:-}}"
 UPDATE_COLLECTIONS="${UPDATE_COLLECTIONS:-catalog,enrollment,grading}"
+UPDATE_COLLECTIONS="${UPDATE_COLLECTIONS//[[:space:]]/}"
 if [ -z "$UPDATE_YEAR" ] || [ -z "$UPDATE_SEM" ]; then
   echo "error: set UPDATE_YEAR/UPDATE_SEM or COUNT_YEAR/COUNT_SEM in collect.env" >&2
   exit 2
 fi
+if [ -z "$UPDATE_COLLECTIONS" ]; then
+  echo "error: UPDATE_COLLECTIONS cannot be empty" >&2
+  exit 2
+fi
 case ",$UPDATE_COLLECTIONS," in
-  *,cart,*)
+  *,cart,*|*,all,*)
     echo "error: full update cannot collect cart; use the bounded cart worker" >&2
     exit 2
     ;;

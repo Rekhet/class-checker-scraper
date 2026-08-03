@@ -8,6 +8,11 @@ independent public Git repository used for GitHub Pages deployment and contains
 only the deployable site and generated public data. The publisher operates on
 that separate worktree explicitly.
 
+The crawler accepts one shared collection interface:
+`--collect catalog,enrollment,cart,grading`. The scheduled full update uses
+`catalog,enrollment,grading`, while a bounded cart window uses `cart`; selecting
+both live metric groups still performs one search pass per term.
+
 ## Configuration
 
 Review `collect.env` for the active semester, timezone, collection mode, and
@@ -34,6 +39,8 @@ day's 16:00 run and a cleanup timer at 16:10.
 
 ```sh
 .venv/bin/python -m unittest discover -s tests -p 'test_*.py'
-systemd-analyze verify systemd/class-checker.update-counts.service \
+systemd-analyze verify systemd/class-checker.update.service \
+  systemd/class-checker.update.timer \
+  systemd/class-checker.update-counts.service \
   systemd/class-checker.update-counts.timer
 ```

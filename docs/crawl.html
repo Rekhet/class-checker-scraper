@@ -74,8 +74,8 @@
 
   <h2 id="trend-windows">인원 추이 collection windows</h2>
   <p>The 인원 추이 (enrolment-trend) chart is a time series: every counts pass appends
-     one <code>count_samples</code> row per class (<code>a</code>=applied 장바구니,
-     <code>e</code>=enrolled 수강인원). Sampling is gated by <strong>collection
+     one <code>count_samples</code> row per class (<code>a</code>=applied 신청,
+     <code>c</code>=cart 장바구니, <code>e</code>=enrolled 수강인원). Sampling is gated by <strong>collection
      windows</strong> in the project-root <code>collect.env</code> (local runtime
      configuration, sourced by
      <code>refresh.sh</code> and the server launcher) so the series only grows while the numbers actually move —
@@ -99,8 +99,7 @@
      개강후 정정 week. The two volatile columns never move together; 확정 days and the
      gaps between cycles move nothing. 2026-2학기 (from co010.action):</p>
   <div class="table-wrap"><table>
-    <tr><th>Phase</th><th>2026-2 date</th><th>장바구니 (a)</th><th>수강인원 (e)</th><th>sample</th></tr>
-    <tr><td>예비장바구니 신청</td><td>07-28</td><td>moves, not collected</td><td>—</td><td>none</td></tr>
+    <tr><th>Phase</th><th>2026-2 date</th><th>장바구니 (c)</th><th>수강인원 (e)</th><th>sample</th></tr>
     <tr><td>예비장바구니 전산확정</td><td>07-29</td><td>frozen</td><td>frozen</td><td>none</td></tr>
     <tr><td>예비선착순수강신청 1–2일차</td><td>07-30 ~ 07-31</td><td>frozen</td><td><strong>moves</strong></td><td>ENROLL</td></tr>
     <tr><td>장바구니신청 1–2일차</td><td>08-04 ~ 08-05</td><td><strong>moves</strong></td><td>—</td><td>CART</td></tr>
@@ -147,26 +146,27 @@ ENROLL_WINDOWS=2026-07-30..2026-07-31,2026-08-07..2026-08-11,2026-08-28..2026-08
     <li>Wipe only this <code>(year, term)</code> — other semesters stay intact.</li>
     <li>Download &amp; parse the Excel → upsert every class with exact timing.</li>
     <li>If Excel timing is largely missing, sweep the 168 search cells (concurrently) and attach coarse timing to the time-less classes.</li>
-    <li>Paginate the search roster and overlay live cart/enrolment counts.</li>
+    <li>Paginate the search roster and overlay the selected live metrics.</li>
   </ol>
 
   <h2 id="cli">Command-line crawler</h2>
-  <pre><code><span class="cmt"># full rebuild of one term (Excel + timing + counts)</span>
-.venv/bin/python scraper/crawl.py --years 2026 --terms U000200002U000300001
+  <pre><code><span class="cmt"># scheduled-style full rebuild (catalog + enrolment + grading, no cart)</span>
+.venv/bin/python scraper/crawl.py --collect catalog,enrollment,grading --years 2026 --terms U000200002U000300001
 
 <span class="cmt"># all of a year's terms</span>
-.venv/bin/python scraper/crawl.py --years 2026
+.venv/bin/python scraper/crawl.py --collect catalog,enrollment,grading --years 2026
 
-<span class="cmt"># fast counts-only pass (no Excel, no cell sweep)</span>
-.venv/bin/python scraper/crawl.py --counts-only --terms U000200002U000300001</code></pre>
+<span class="cmt"># fast cart-only pass (no Excel, no cell sweep)</span>
+.venv/bin/python scraper/crawl.py --collect cart --terms U000200002U000300001</code></pre>
 
   <div class="table-wrap"><table>
     <tr><th>Flag</th><th>Effect</th></tr>
     <tr><td><code>--years</code></td><td>Comma-separated years (default <code>2026</code>).</td></tr>
     <tr><td><code>--terms</code></td><td>Comma-separated cmmnCd subset; blank = all terms of the year.</td></tr>
-    <tr><td><code>--counts-only</code></td><td>Skip Excel + cell sweep; only refresh live enrolment counts.</td></tr>
-    <tr><td><code>--cart-only</code></td><td>With <code>--counts-only</code>, update and sample 장바구니 only.</td></tr>
-    <tr><td><code>--windowed</code></td><td>With <code>--counts-only</code>, skip before any network work when the configured collection window is inactive.</td></tr>
+    <tr><td><code>--collect</code></td><td>Comma-separated <code>catalog</code>, <code>enrollment</code>, <code>cart</code>, and <code>grading</code> components; <code>all</code> selects every component. Repeatable.</td></tr>
+    <tr><td><code>--counts-only</code></td><td>Legacy alias for <code>--collect cart,enrollment</code>.</td></tr>
+    <tr><td><code>--cart-only</code></td><td>Legacy alias for <code>--collect cart</code> with <code>--counts-only</code>.</td></tr>
+    <tr><td><code>--windowed</code></td><td>Skip before any network work when the selected live metric windows are inactive.</td></tr>
     <tr><td><code>--no-counts</code></td><td>Excel (+ timing recovery) only; skip the count overlay.</td></tr>
     <tr><td><code>--no-search-timing</code></td><td>Skip the cell sweep even when the Excel timing is missing.</td></tr>
     <tr><td><code>--workers</code></td><td>Concurrent cell fetchers for the timing sweep (default <code>6</code>).</td></tr>
