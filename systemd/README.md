@@ -92,7 +92,10 @@ generated cart timer uses `Persistent=false`, so missed cart activations are
 not replayed after wake. The full-update and cleanup timers are persistent and
 may receive a catch-up activation. Cleanup waits up to 1800 seconds for an
 active collector or the shared lock; if that wait expires, it leaves the
-window state for manual recovery.
+window state for manual recovery. Before deleting the generated window files,
+cleanup also requires the collector to report `Result=success` and to have a
+non-empty `ExecMainStartTimestamp`; a failed, unavailable, or never-run
+collector leaves the state in place and returns failure.
 
 An activation request for a service that is already running is not executed in
 parallel. The full, cart, and cleanup services are distinct, so they can be
@@ -110,8 +113,7 @@ deferred.
 ## Deferred hardening
 
 The current design intentionally defers lock-wait retry/backoff, cleanup
-verification of the collector's final `Result=success`, automatic retry of a
-failed final sample, forced-count cart semantics, transactional catalog
-rebuilds, isolation of unrelated pre-staged publication changes, and recovery
-after long sleep or service timeout. The implementation plan records the
-rationale and current audit state.
+automatic retry of a failed or never-run final sample, forced-count cart
+semantics, transactional catalog rebuilds, isolation of unrelated pre-staged
+publication changes, and recovery after long sleep or service timeout. The
+implementation plan records the rationale and current audit state.

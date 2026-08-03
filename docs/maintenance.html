@@ -67,12 +67,14 @@ systemctl --user enable --now class-checker.update.timer
     <tr><td>Long collector or cleanup</td>
         <td>The cart service has a 20-minute timeout and cleanup has 35 minutes.
             Cleanup waits up to 1800 seconds for the worker and lock, then
-            leaves window state for manual recovery.</td></tr>
+            leaves window state for manual recovery. It also requires the
+            collector to report <code>Result=success</code> and to have actually
+            started before deleting generated files.</td></tr>
   </table></div>
-  <p>Automatic retry after lock contention, cleanup verification of the final
-     collector result, forced-count cart semantics, transactional rebuild
-     recovery, publication staging isolation, and direct-wrapper process-group
-     hardening remain deferred. The full rationale is in the
+  <p>Automatic retry after lock contention or a failed/never-run final sample,
+     forced-count cart semantics, transactional rebuild recovery, publication
+     staging isolation, and direct-wrapper process-group hardening remain
+     deferred. The full rationale is in the
      <a href="superpowers/plans/2026-08-03-cart-window-systemd-timer.md#post-implementation-audit-2026-08-04">implementation audit</a>.</p>
 
   <h2 id="fall">Fall timing recovery</h2>

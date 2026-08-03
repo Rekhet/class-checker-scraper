@@ -247,13 +247,15 @@ class CartWindowCleanupTests(unittest.TestCase):
                 "log = pathlib.Path(os.environ['SYSTEMCTL_LOG'])\n"
                 "with log.open('a', encoding='utf-8') as fh: fh.write(' '.join(args) + '\\n')\n"
                 "command = args[1] if args and args[0] == '--user' and len(args) > 1 else (args[0] if args else '')\n"
-                "if command == 'show' and any(x.endswith('.service') for x in args):\n"
+                "if command == 'show' and 'Result' in args:\n"
+                "    print(os.environ.get('SYSTEMCTL_RESULT', 'success'))\n"
+                "elif command == 'show' and 'ExecMainStartTimestamp' in args:\n"
+                "    print('Tue 2026-08-04 09:00:00 KST')\n"
+                "elif command == 'show' and any(x.endswith('.service') for x in args):\n"
                 "    state = pathlib.Path(os.environ['SYSTEMCTL_STATE'])\n"
                 "    count = int(state.read_text() or '0') + 1 if state.exists() else 1\n"
                 "    state.write_text(str(count))\n"
                 "    print('active' if count < 3 else 'inactive')\n"
-                "elif command == 'show' and 'Result' in args:\n"
-                "    print('success')\n"
             )
             timer = unit_dir / "class-checker.cart@20260804.timer"
             env_file = unit_dir / "class-checker.cart-window-20260804.env"
@@ -300,6 +302,160 @@ class CartWindowCleanupTests(unittest.TestCase):
                 and "class-checker.cart@20260804.service" in x
                 for x in commands
             ))
+
+    def test_cleanup_leaves_units_when_collector_result_is_not_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            unit_dir = root / "user"
+            unit_dir.mkdir()
+            log = root / "systemctl.log"
+            fake_systemctl = root / "systemctl"
+            _executable(
+                fake_systemctl,
+                "#!/usr/bin/env python3\n"
+                "import os, pathlib, sys\n"
+                "args = sys.argv[1:]\n"
+                "log = pathlib.Path(os.environ['SYSTEMCTL_LOG'])\n"
+                "with log.open('a', encoding='utf-8') as fh: fh.write(' '.join(args) + '\\n')\n"
+                "command = args[1] if args and args[0] == '--user' and len(args) > 1 else (args[0] if args else '')\n"
+                "if command == 'show' and 'Result' in args:\n"
+                "    print('exit-code')\n"
+                "elif command == 'show' and any(x.endswith('.service') for x in args):\n"
+                "    print('inactive')\n"
+            )
+            timer = unit_dir / "class-checker.cart@20260804.timer"
+            cleanup_timer = unit_dir / "class-checker.cart-cleanup@20260804.timer"
+            env_file = unit_dir / "class-checker.cart-window-20260804.env"
+            for path in (timer, cleanup_timer, env_file):
+                path.write_text("placeholder", encoding="utf-8")
+
+            env = os.environ.copy()
+            env["SYSTEMCTL_LOG"] = str(log)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(CLEANUP),
+                    "--window-id",
+                    "20260804",
+                    "--unit-dir",
+                    str(unit_dir),
+                    "--systemctl",
+                    str(fake_systemctl),
+                    "--wait-timeout",
+                    "2",
+                    "--poll-interval",
+                    "0.01",
+                ],
+                cwd=ROOT,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("collector service result", result.stderr)
+            self.assertTrue(timer.exists())
+            self.assertTrue(cleanup_timer.exists())
+            self.assertTrue(env_file.exists())
+
+    def test_cleanup_leaves_units_when_collector_result_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            unit_dir = root / "user"
+            unit_dir.mkdir()
+            fake_systemctl = root / "systemctl"
+            _executable(
+                fake_systemctl,
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "args = sys.argv[1:]\n"
+                "command = args[1] if args and args[0] == '--user' and len(args) > 1 else (args[0] if args else '')\n"
+                "if command == 'show' and 'Result' in args:\n"
+                "    raise SystemExit(5)\n"
+                "if command == 'show':\n"
+                "    print('inactive')\n"
+            )
+            timer = unit_dir / "class-checker.cart@20260804.timer"
+            env_file = unit_dir / "class-checker.cart-window-20260804.env"
+            timer.write_text("placeholder", encoding="utf-8")
+            env_file.write_text("placeholder", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(CLEANUP),
+                    "--window-id",
+                    "20260804",
+                    "--unit-dir",
+                    str(unit_dir),
+                    "--systemctl",
+                    str(fake_systemctl),
+                    "--wait-timeout",
+                    "2",
+                    "--poll-interval",
+                    "0.01",
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("collector service not found", result.stderr)
+            self.assertTrue(timer.exists())
+            self.assertTrue(env_file.exists())
+
+    def test_cleanup_leaves_units_when_collector_has_not_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            unit_dir = root / "user"
+            unit_dir.mkdir()
+            fake_systemctl = root / "systemctl"
+            _executable(
+                fake_systemctl,
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "args = sys.argv[1:]\n"
+                "command = args[1] if args and args[0] == '--user' and len(args) > 1 else (args[0] if args else '')\n"
+                "if command == 'show' and 'Result' in args:\n"
+                "    print('success')\n"
+                "elif command == 'show' and 'ExecMainStartTimestamp' in args:\n"
+                "    print('')\n"
+                "elif command == 'show':\n"
+                "    print('inactive')\n"
+            )
+            timer = unit_dir / "class-checker.cart@20260804.timer"
+            env_file = unit_dir / "class-checker.cart-window-20260804.env"
+            timer.write_text("placeholder", encoding="utf-8")
+            env_file.write_text("placeholder", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(CLEANUP),
+                    "--window-id",
+                    "20260804",
+                    "--unit-dir",
+                    str(unit_dir),
+                    "--systemctl",
+                    str(fake_systemctl),
+                    "--wait-timeout",
+                    "2",
+                    "--poll-interval",
+                    "0.01",
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("did not run", result.stderr)
+            self.assertTrue(timer.exists())
+            self.assertTrue(env_file.exists())
 
     def test_cleanup_leaves_units_when_shared_lock_stays_busy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -3,10 +3,10 @@
 ## Status
 
 Accepted and implemented. The blocker-remediation pass, date-bounded timer,
-cart-free full-refresh defaults, shared lock audit, and operational
-documentation are complete in the root automation repository. The August
-4–5, 2026 window is installed; its final collector and scheduled cleanup
-journal entries remain live verification items until those events occur.
+cart-free full-refresh defaults, shared lock audit, Result=success cleanup gate,
+and operational documentation are complete in the root automation repository.
+The August 4–5, 2026 window is installed; its final collector and scheduled
+cleanup journal entries remain live verification items until those events occur.
 
 Date: 2026-08-04
 
@@ -37,6 +37,9 @@ As of 2026-08-04:
       and systemd-like interrupted workers.
 - [x] The maintenance, README, and systemd operations documentation describe
       the lock, sleep/wake, overlap, timeout, and deferred-recovery behavior.
+- [x] Cleanup requires an inactive collector with `Result=success` and a real
+      `ExecMainStartTimestamp` before removing generated window state; failed,
+      unavailable, or never-run collectors leave that state in place.
 
 The root automation repository was initialized with commit `97bca30`. The
 public `web/` repository remains separate and is intentionally ignored by the
@@ -66,8 +69,10 @@ Each window also gets a separate cleanup timer. It runs shortly after the final
 1. stops the date-specific collector timer so no new run can start;
 2. waits for an active collector to finish without killing it, using service
    state and/or the shared process lock;
-3. disables the collector and cleanup timer instances;
-4. removes only those generated instances and reloads the user systemd manager.
+3. requires the collector's final `Result=success` and an actual execution
+   timestamp, otherwise reports failure and preserves the window state;
+4. disables the collector and cleanup timer instances;
+5. removes only those generated instances and reloads the user systemd manager.
 
 Reusable unit templates remain installed for future semesters. Cleanup removes
 only the one-window instances, not the templates or the installer itself.
@@ -171,10 +176,10 @@ date-specific instance and invoke the existing locked worker.
 - [x] Collector schedule includes 09:00 and 16:00, but no 16:10 run.
 - [x] Cleanup runs after the final trigger, stops future collector activations,
       waits for active work, and never kills an active collector.
-- [ ] Cleanup verifies the collector's final systemd `Result=success` and
-      provides an automatic retry or explicit failed-sample recovery policy.
-      The current implementation waits and cleans the window without that
-      result check; this is a documented deferred hardening item.
+- [x] Cleanup verifies the collector's final systemd `Result=success` and
+      actual execution timestamp before deleting generated window state.
+- [ ] Cleanup provides an automatic retry or explicit failed-sample recovery
+      policy; failed validation currently leaves state for manual recovery.
 - [x] Templates are reusable; cleanup does not remove them.
 
 **Verification:**
@@ -299,8 +304,8 @@ The following are deliberately deferred, not silently considered solved:
 4. Forced or ended-term count modes' legacy cart behavior.
 5. Transactional catalog rebuilds after `refresh_all()` clears and commits.
 6. Isolation of unrelated pre-staged changes by the Git publisher.
-7. Cleanup inspection of the collector's final `Result=success` and automatic
-   retry of a failed final sample.
+7. Automatic retry or durable recovery of a failed or never-run final sample;
+   the `Result=success` and actual-execution gate is implemented.
 
 The final cart-worker journal and 16:10 cleanup journal still need to be
 checked after the real August 4–5 window. The temporary blocker note remains

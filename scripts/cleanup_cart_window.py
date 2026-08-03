@@ -69,6 +69,36 @@ def wait_for_service_inactive(
         time.sleep(min(max(0.01, poll_interval), max(0.01, deadline - time.monotonic())))
 
 
+def _service_property(
+    executable: str, service: str, property_name: str
+) -> str | None:
+    result = _systemctl(
+        executable,
+        ["show", service, "-p", property_name, "--value"],
+        tolerate_unit_missing=True,
+    )
+    if result.returncode == UNIT_NOT_FOUND:
+        return None
+    return result.stdout.strip()
+
+
+def verify_service_succeeded(executable: str, service: str) -> None:
+    result = _service_property(executable, service, "Result")
+    if result is None:
+        raise RuntimeError(f"collector service not found: {service}")
+    if result != "success":
+        raise RuntimeError(
+            f"collector service result was {result or 'unknown'}: {service}"
+        )
+    # An inactive unit can have the default success result without ever running.
+    # Require an execution timestamp before treating the window as collected.
+    started = _service_property(executable, service, "ExecMainStartTimestamp")
+    if started is None:
+        raise RuntimeError(f"collector service not found: {service}")
+    if not started or started.lower() == "n/a":
+        raise RuntimeError(f"collector service did not run: {service}")
+
+
 def wait_for_lock(
     lock_path: Path | None, timeout: float, poll_interval: float
 ) -> None:
@@ -115,6 +145,7 @@ def cleanup_window(
         wait_for_service_inactive(
             systemctl, collector_service, wait_timeout, poll_interval
         )
+        verify_service_succeeded(systemctl, collector_service)
         wait_for_lock(lock_path, wait_timeout, poll_interval)
     except TimeoutError as exc:
         print(f"cleanup deferred: {exc}", file=sys.stderr)

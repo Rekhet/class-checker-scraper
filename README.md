@@ -58,7 +58,13 @@ may activate independently, but the shared lock serializes their writes. A
 later worker waits for the lock and follows the same 900-second timeout; no
 durable run queue is created.
 
-The remaining hardening items are recorded in the [implementation plan](docs/superpowers/plans/2026-08-03-cart-window-systemd-timer.md#post-implementation-audit-2026-08-04): lock-wait retry policy, cleanup result verification, forced-count cart semantics, transactional rebuild recovery, publication staging isolation, and direct-wrapper process-group handling.
+Before cleanup removes a bounded window's generated state, it requires the
+collector service to be inactive, to report `Result=success`, and to have an
+actual `ExecMainStartTimestamp`. A failed, unavailable, or never-run collector
+therefore leaves the window state in place and returns failure. Automatic retry
+of that failed window remains deferred.
+
+The remaining hardening items are recorded in the [implementation plan](docs/superpowers/plans/2026-08-03-cart-window-systemd-timer.md#post-implementation-audit-2026-08-04): lock-wait retry policy, automatic retry after failed cleanup validation, forced-count cart semantics, transactional rebuild recovery, publication staging isolation, and direct-wrapper process-group handling.
 
 ## Verification
 
