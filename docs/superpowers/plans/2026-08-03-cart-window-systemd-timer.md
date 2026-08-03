@@ -2,18 +2,19 @@
 
 ## Status
 
-Accepted design. The first blocker-remediation pass and the date-bounded timer
-implementation are complete in the root automation repository. The live
-window is installed; its scheduled cleanup journal entry will be verified after
-the final 16:10 event.
+Accepted and implemented. The blocker-remediation pass, date-bounded timer,
+cart-free full-refresh defaults, shared lock audit, and operational
+documentation are complete in the root automation repository. The August
+4–5, 2026 window is installed; its final collector and scheduled cleanup
+journal entries remain live verification items until those events occur.
 
-Date: 2026-08-03
+Date: 2026-08-04
 
 Related audit note: `/tmp/class-checker-blockers.md`
 
 ## Blocker-remediation progress
 
-As of 2026-08-03:
+As of 2026-08-04:
 
 - [x] Git publication is rooted explicitly at `web/` and fails closed when
       publication is requested but that worktree is unavailable.
@@ -30,6 +31,12 @@ As of 2026-08-03:
 - [x] Implement the date-bounded collector and cleanup timer lifecycle. The
       August 4–5, 2026 window is installed and active on the user systemd
       manager.
+- [x] Normal full refresh entrypoints select `catalog,enrollment,grading` and
+      exclude cart; cart collection is isolated to the bounded worker.
+- [x] The shared lock lifecycle is covered for successful, failed, exceptional,
+      and systemd-like interrupted workers.
+- [x] The maintenance, README, and systemd operations documentation describe
+      the lock, sleep/wake, overlap, timeout, and deferred-recovery behavior.
 
 The root automation repository was initialized with commit `97bca30`. The
 public `web/` repository remains separate and is intentionally ignored by the
@@ -164,8 +171,10 @@ date-specific instance and invoke the existing locked worker.
 - [x] Collector schedule includes 09:00 and 16:00, but no 16:10 run.
 - [x] Cleanup runs after the final trigger, stops future collector activations,
       waits for active work, and never kills an active collector.
-- [x] Cleanup is safe to retry and leaves failed instances available for manual
-      recovery.
+- [ ] Cleanup verifies the collector's final systemd `Result=success` and
+      provides an automatic retry or explicit failed-sample recovery policy.
+      The current implementation waits and cleans the window without that
+      result check; this is a documented deferred hardening item.
 - [x] Templates are reusable; cleanup does not remove them.
 
 **Verification:**
@@ -233,7 +242,7 @@ path and document the future-semester procedure.
 
 | Risk | Impact | Mitigation |
 |---|---:|---|
-| Laptop sleeps during the window | Medium | Do not replay every missed collector event; run the next future event and use a cleanup recovery path. |
+| Laptop sleeps during the window | Medium | The suspended owner keeps the lock; cart events are not replayed, while persistent full/cleanup timers may catch up. Waiting workers exit 75 after 900 seconds; retry policy is deferred. |
 | Collector runs past 16:00 | High | Cleanup stops future triggers, then waits on service state/shared lock with a bounded timeout. |
 | Systemd clock coalesces a trigger | Medium | Use explicit `Asia/Seoul` and `AccuracySec=1s`; retain the application-level window guard. |
 | Git publication fails | High | Correct the `web/` root and fail closed unless local-only mode is explicit. |
@@ -254,7 +263,46 @@ path and document the future-semester procedure.
 
 ## Implementation boundary
 
-This document records the agreed architecture and implementation order. The
-date-bounded collector and cleanup timer may now be implemented and installed
-from the root automation repository; the public `web/` repository must remain
-untouched except when the publisher deliberately updates deployment data.
+This document records the agreed architecture, implementation order, and the
+post-implementation audit. The date-bounded collector and cleanup timer are
+implemented and installed from the root automation repository; the public
+`web/` repository must remain untouched except when the publisher deliberately
+updates deployment data.
+
+## Post-implementation audit (2026-08-04)
+
+The current behavior is intentionally split between a normal full refresh and a
+date-bounded cart worker:
+
+- The crawler defaults, `refresh.sh`, Makefile targets, scheduled update
+  wrapper, and admin refresh endpoint use `catalog,enrollment,grading`.
+- The bounded worker alone selects `cart`, runs every ten minutes from 09:00 on
+  the start date through 16:00 on the next date, and schedules cleanup at
+  16:10. The legacy broad count timer must remain disabled.
+- All cooperating database/export/publication writers use the same advisory
+  `data/.crawl.lock`. The file remains on disk; the kernel lock on its open
+  descriptor is released on normal return, nonzero result, exception, or
+  process termination. Systemd's `KillMode=control-group` covers the wrapper
+  and its child processes together.
+- A suspended owner keeps the lock. A waiter exits 75 after the 900-second
+  lock timeout; cleanup waits up to 1800 seconds. Cart timers do not replay
+  missed events, while persistent full/cleanup timers may catch up. Separate
+  services serialize through the lock rather than creating a durable queue.
+
+The following are deliberately deferred, not silently considered solved:
+
+1. Lock-wait overrun retry, backoff, and durable missed-run handling.
+2. Recovery and retry policy after sleep/wake or a service timeout, including
+   the cart service's 20-minute `TimeoutStartSec`.
+3. Explicit process-group hardening for callers that signal only a wrapper
+   outside systemd.
+4. Forced or ended-term count modes' legacy cart behavior.
+5. Transactional catalog rebuilds after `refresh_all()` clears and commits.
+6. Isolation of unrelated pre-staged changes by the Git publisher.
+7. Cleanup inspection of the collector's final `Result=success` and automatic
+   retry of a failed final sample.
+
+The final cart-worker journal and 16:10 cleanup journal still need to be
+checked after the real August 4–5 window. The temporary blocker note remains
+the detailed working record; this section is the permanent summary of the
+decision and audit state.

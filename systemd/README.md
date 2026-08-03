@@ -20,11 +20,13 @@ systemctl --user daemon-reload
 systemctl --user enable --now class-checker.update.timer
 ```
 
-The legacy counts timer is deliberately broad on weekdays during 09:00–20:50. The
-`--windowed` pass checks `collect.env` before opening a SNU session, so it is
-inactive outside the configured cart/enrollment windows. Change `COUNT_MODE`
-to `counts` in `collect.env` when the same cadence should collect both live
-metric groups. The preferred interface is the crawler's explicit
+The legacy counts timer is deliberately broad on weekdays during 09:00–20:50,
+but it must remain disabled when a bounded cart window is installed. The
+`--windowed` pass checks `collect.env` before opening a SNU session, so the
+legacy worker is inactive outside the configured cart/enrollment windows.
+Change `COUNT_MODE` to `counts` in `collect.env` when an intentional manual or
+legacy run should collect both live metric groups. The preferred interface is
+the crawler's explicit
 `--collect` selection:
 
 ```text
@@ -73,3 +75,43 @@ The launcher rejects that state unless `--disable-broad-timer` is supplied. It
 also rejects a second overlapping bounded window and is safe to rerun for the
 same start date. Use `--dry-run` to inspect a schedule without changing files
 or systemd.
+
+## Lock, sleep, and overlap behavior
+
+All cooperating writers use the advisory `flock(2)` at
+`data/.crawl.lock`. The lock file itself remains on disk after a run; its open
+file descriptor and kernel lock are the protection. A successful run, a
+nonzero worker result, an exception, or process termination releases the lock.
+The user services report `KillMode=control-group`, so systemd termination is
+expected to terminate the wrapper and its child together.
+
+When the computer sleeps, a suspended lock owner normally keeps its descriptor
+and lock. A waiting worker can therefore remain blocked until the
+`CRAWL_LOCK_TIMEOUT` default of 900 seconds, then exits with status 75. The
+generated cart timer uses `Persistent=false`, so missed cart activations are
+not replayed after wake. The full-update and cleanup timers are persistent and
+may receive a catch-up activation. Cleanup waits up to 1800 seconds for an
+active collector or the shared lock; if that wait expires, it leaves the
+window state for manual recovery.
+
+An activation request for a service that is already running is not executed in
+parallel. The full, cart, and cleanup services are distinct, so they can be
+requested independently, but the shared lock serializes their database,
+export, and publication work. A later worker waits and then exits 75 if the
+first worker does not release the lock in time; the current design does not
+queue an automatic retry.
+
+The cart service has a 20-minute `TimeoutStartSec`; cleanup has 35 minutes.
+Systemd termination releases the lock, but interrupted work may be partial and
+is not automatically retried. Directly signalling only a wrapper outside
+systemd could leave an orphaned child; explicit process-group hardening is
+deferred.
+
+## Deferred hardening
+
+The current design intentionally defers lock-wait retry/backoff, cleanup
+verification of the collector's final `Result=success`, automatic retry of a
+failed final sample, forced-count cart semantics, transactional catalog
+rebuilds, isolation of unrelated pre-staged publication changes, and recovery
+after long sleep or service timeout. The implementation plan records the
+rationale and current audit state.

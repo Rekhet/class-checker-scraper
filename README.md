@@ -35,6 +35,31 @@ Use `--dry-run` to print the exact schedule without changing systemd. The
 launcher creates a collector timer for every ten minutes through the next
 day's 16:00 run and a cleanup timer at 16:10.
 
+## Runtime safety and recovery
+
+Every database, export, and publication writer cooperates through the advisory
+`flock(2)` at `data/.crawl.lock`. The zero-length file is intentionally
+persistent; the kernel lock held on its open file descriptor is what protects
+the data. Successful completion, a failed child process, an exception, or an
+interrupted process releases that lock. The user systemd services use
+`KillMode=control-group`, so a systemd interruption terminates the worker and
+its child processes together.
+
+If the computer sleeps while a writer owns the lock, the suspended process
+keeps the lock. A waiting worker waits up to `CRAWL_LOCK_TIMEOUT` (900 seconds
+by default), then exits with status 75; it is not automatically retried. The
+bounded cart timer does not replay missed activations after wake, while the
+full-update and cleanup timers may receive their configured persistent catch-up
+activation.
+
+Repeated activation of one oneshot service does not run that service in
+parallel. Full-update, cart, and cleanup services are separate units, so they
+may activate independently, but the shared lock serializes their writes. A
+later worker waits for the lock and follows the same 900-second timeout; no
+durable run queue is created.
+
+The remaining hardening items are recorded in the [implementation plan](docs/superpowers/plans/2026-08-03-cart-window-systemd-timer.md#post-implementation-audit-2026-08-04): lock-wait retry policy, cleanup result verification, forced-count cart semantics, transactional rebuild recovery, publication staging isolation, and direct-wrapper process-group handling.
+
 ## Verification
 
 ```sh

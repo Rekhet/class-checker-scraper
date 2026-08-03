@@ -44,6 +44,37 @@ systemctl --user enable --now class-checker.update.timer
        JSON export and Git publication. The old broad
        <code>class-checker.update-counts.timer</code> should remain disabled.</p></div>
 
+  <h2 id="safety">Worker safety and recovery</h2>
+  <p>All database, export, and publication writers share the advisory
+     <code>flock(2)</code> at <code>data/.crawl.lock</code>. The zero-length lock
+     file may remain after a run; its open file descriptor and kernel lock are
+     what provide protection. A successful run, failed worker, exception, or
+     systemd interruption releases the lock. The user services use
+     <code>KillMode=control-group</code>, so systemd terminates the wrapper and
+     its child processes together.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Situation</th><th>Current behavior</th></tr>
+    <tr><td>Computer sleeps</td>
+        <td>A suspended lock owner normally keeps the lock. A waiter can wait up
+            to 900 seconds, then exits with status <code>75</code>. Missed cart
+            activations are not replayed; persistent full/cleanup timers may
+            receive a catch-up activation.</td></tr>
+    <tr><td>Overlapping requests</td>
+        <td>The same oneshot service does not run in parallel. Separate full,
+            cart, and cleanup services serialize through the shared lock; a
+            waiter exits <code>75</code> after the lock timeout rather than
+            creating a durable queue.</td></tr>
+    <tr><td>Long collector or cleanup</td>
+        <td>The cart service has a 20-minute timeout and cleanup has 35 minutes.
+            Cleanup waits up to 1800 seconds for the worker and lock, then
+            leaves window state for manual recovery.</td></tr>
+  </table></div>
+  <p>Automatic retry after lock contention, cleanup verification of the final
+     collector result, forced-count cart semantics, transactional rebuild
+     recovery, publication staging isolation, and direct-wrapper process-group
+     hardening remain deferred. The full rationale is in the
+     <a href="superpowers/plans/2026-08-03-cart-window-systemd-timer.md#post-implementation-audit-2026-08-04">implementation audit</a>.</p>
+
   <h2 id="fall">Fall timing recovery</h2>
   <p>Before SNU publishes a term's timetable into the Excel, its 수업교시 column is
      empty. The crawl detects this (low Excel-timed ratio) and recovers
