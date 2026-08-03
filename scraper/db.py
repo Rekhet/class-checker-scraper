@@ -403,7 +403,7 @@ def update_counts(conn: sqlite3.Connection, year: str, shtm_fg: str,
     return cur.rowcount > 0
 
 
-def snapshot_cart_counts(conn: sqlite3.Connection, year_terms) -> dict[tuple, int | None]:
+def snapshot_cart_counts(conn: sqlite3.Connection, year_terms) -> dict[tuple, int]:
     """Capture cart values by stable class identity before a catalog rebuild."""
     saved = {}
     for year, term in year_terms:
@@ -413,12 +413,13 @@ def snapshot_cart_counts(conn: sqlite3.Connection, year_terms) -> dict[tuple, in
             (year, term),
         ).fetchall()
         for row in rows:
-            saved[(row["year"], row["shtm_fg"], row["deta_shtm_fg"],
-                  row["sbjt_cd"], row["lt_no"], row["subh_cd"])] = row["cart"]
+            if row["cart"] is not None:
+                saved[(row["year"], row["shtm_fg"], row["deta_shtm_fg"],
+                      row["sbjt_cd"], row["lt_no"], row["subh_cd"])] = row["cart"]
     return saved
 
 
-def restore_cart_counts(conn: sqlite3.Connection, saved: dict[tuple, int | None]) -> int:
+def restore_cart_counts(conn: sqlite3.Connection, saved: dict[tuple, int]) -> int:
     """Restore captured cart values onto matching rows recreated by a rebuild."""
     if not saved:
         return 0
