@@ -21,6 +21,8 @@ PY="${PY:-.venv/bin/python}"
 EXTRA=()
 terms=()
 years=()
+collection_selected=0
+legacy_collection_mode=0
 
 # seed years from env YEAR (comma or space separated) if provided
 if [ -n "${YEAR:-}" ]; then
@@ -67,9 +69,11 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --collect)           EXTRA+=("$1" "$2"); shift 2;;
+    --collect)           EXTRA+=("$1" "$2"); collection_selected=1; shift 2;;
     --year)            IFS=', ' read -r -a _y <<< "$2"; years+=("${_y[@]}"); shift 2;;
-    --counts-only|--cart-only|--windowed|--no-counts|--no-search-timing|--force)
+    --counts-only|--cart-only|--windowed|--no-counts)
+                       EXTRA+=("$1"); legacy_collection_mode=1; shift;;
+    --no-search-timing|--force)
                        EXTRA+=("$1"); shift;;
     -h|--help)         usage; exit 0;;
     all|전체)           terms+=("${CODE[spring]}" "${CODE[fall]}" "${CODE[summer]}" "${CODE[winter]}"); shift;;
@@ -81,6 +85,12 @@ while [ $# -gt 0 ]; do
     *) echo "error: unknown semester or option: $1" >&2; usage; exit 2;;
   esac
 done
+
+# Make the safe full-update selection visible at this boundary too. Count-only
+# and other legacy collection modes retain their crawler-side interpretation.
+if [ "$collection_selected" -eq 0 ] && [ "$legacy_collection_mode" -eq 0 ]; then
+  EXTRA=(--collect catalog,enrollment,grading "${EXTRA[@]}")
+fi
 
 if [ "${#terms[@]}" -eq 0 ]; then
   echo "error: at least one semester is required (refusing to refresh all; use 'all')." >&2

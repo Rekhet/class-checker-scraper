@@ -150,6 +150,7 @@ ProgressFn = Callable[[dict], None]
 # groups, so selecting both never requires two duplicate requests.
 COLLECTION_COMPONENTS = frozenset(("catalog", "enrollment", "cart", "grading"))
 LIVE_COMPONENTS = frozenset(("enrollment", "cart"))
+DEFAULT_FULL_COMPONENTS = frozenset(("catalog", "enrollment", "grading"))
 
 
 def parse_collection_spec(values: str | list[str]) -> frozenset[str]:
@@ -400,7 +401,7 @@ def _search_times(client: SnuClient, year: str, term: str, *,
 
 def crawl_term(conn, client: SnuClient, year: str, term: str, *,
                label: str = "", live_counts: bool = True,
-               collect_cart: bool = True, collect_enrollment: bool = True,
+               collect_cart: bool = False, collect_enrollment: bool = True,
                collect_grading: bool = True,
                search_timing: bool = True,
                progress: ProgressFn | None = None) -> dict:
@@ -478,7 +479,7 @@ def refresh_all(conn, years: list[str], terms: list[str] | None = None, *,
                 mint: Callable[[], dict] = snu_session.mint_session,
                 live_counts: bool = True, search_timing: bool = True,
                 force: bool = False, progress: ProgressFn | None = None,
-                collect_cart: bool = True, collect_enrollment: bool = True,
+                collect_cart: bool = False, collect_enrollment: bool = True,
                 collect_grading: bool = True) -> dict:
     """Rebuild the selected terms and run the selected catalog/live/grading steps."""
     if not live_counts:
@@ -674,7 +675,7 @@ def parse_args(argv: list[str] | None = None):
     elif args.counts_only:
         selected = frozenset(("cart",)) if args.cart_only else LIVE_COMPONENTS
     else:
-        selected = COLLECTION_COMPONENTS
+        selected = DEFAULT_FULL_COMPONENTS
         if args.no_counts:
             selected = selected - LIVE_COMPONENTS
 

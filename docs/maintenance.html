@@ -27,16 +27,22 @@
         <td>Light — one paginated roster/term</td>
         <td>Often during registration (e.g. every few minutes)</td></tr>
   </table></div>
-  <pre><code><span class="cmt"># existing full update timer</span>
+  <pre><code><span class="cmt"># existing full update timer (cart excluded)</span>
 systemctl --user enable --now class-checker.update.timer
 
-<span class="cmt"># fast cart/trend timer (install systemd/ units first)</span>
-systemctl --user enable --now class-checker.update-counts.timer</code></pre>
+<span class="cmt"># bounded two-day cart window</span>
+./scripts/start-cart-window \
+  --start-date 2026-08-04 \
+  --year 2026 \
+  --semester fall \
+  --timezone Asia/Seoul \
+  --disable-broad-timer</code></pre>
   <div class="callout note"><span class="ic">⏱️</span>
-    <p>Both writers use the same host-local <code>data/.crawl.lock</code>, including
-       JSON export and Git publication. The fast timer checks <code>collect.env</code>
-       before opening a SNU session and publishes only the changed trend JSON plus
-       its class-index pointer.</p></div>
+    <p>The scheduled full update collects the catalog, enrollment, and grading
+       components, but not cart. The bounded worker is the only scheduled cart
+       collector. Both use the same host-local <code>data/.crawl.lock</code>, including
+       JSON export and Git publication. The old broad
+       <code>class-checker.update-counts.timer</code> should remain disabled.</p></div>
 
   <h2 id="fall">Fall timing recovery</h2>
   <p>Before SNU publishes a term's timetable into the Excel, its 수업교시 column is

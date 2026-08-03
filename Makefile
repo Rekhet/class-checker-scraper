@@ -11,7 +11,7 @@ export TURSO_DATABASE_URL ?= data/turso.db
 #   make refresh YEAR=2026 SEM="spring fall"
 SEM ?=
 export YEAR ?=
-COLLECT ?=
+COLLECT ?= catalog,enrollment,grading
 
 # Production (Turso cloud) credentials: prod.env = READ-ONLY (web tier),
 # prod-admin.env = READ-WRITE (migrate/refresh/flush). Both chmod 600, never committed.
@@ -27,7 +27,7 @@ serve:           ## launch on Turso (with dev/admin panels):  make serve PORT=90
 	@WEB_INDEX=index-dev.html ./serve.sh
 
 refresh:         ## refresh:  make refresh YEAR=2026 SEM="fall" [COLLECT=catalog,enrollment,grading]
-	@./refresh.sh $(if $(COLLECT),--collect "$(COLLECT)") $(SEM)
+	@./refresh.sh --collect "$(COLLECT)" $(SEM)
 
 refresh-counts:  ## counts-only:  make refresh-counts YEAR=2026 SEM="fall"
 	@./refresh.sh --counts-only $(SEM)
@@ -49,7 +49,7 @@ migrate-remote:  ## push the full local catalog -> production (write token)
 	@set -a; . ./$(ADMIN_ENV); set +a; .venv/bin/python scraper/migrate_to_turso.py --src data/turso.db
 
 refresh-remote:  ## refresh production:  make refresh-remote YEAR=2026 SEM=fall
-	@set -a; . ./$(ADMIN_ENV); set +a; ./refresh.sh $(SEM)
+	@set -a; . ./$(ADMIN_ENV); set +a; ./refresh.sh --collect "$(COLLECT)" $(SEM)
 
 refresh-force-remote: ## force counts for an ENDED term on production:  make refresh-force-remote YEAR=2025 SEM=fall
 	@set -a; . ./$(ADMIN_ENV); set +a; ./refresh.sh --counts-only --force $(SEM)

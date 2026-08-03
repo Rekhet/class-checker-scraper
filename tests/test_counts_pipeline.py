@@ -190,6 +190,14 @@ class CountsPipelineTests(unittest.TestCase):
             frozenset({"catalog", "enrollment", "grading"}),
         )
 
+    def test_default_full_collection_excludes_cart(self) -> None:
+        args = crawl.parse_args(["--years", "2026", "--terms", "fall"])
+
+        self.assertEqual(
+            args.collections,
+            frozenset({"catalog", "enrollment", "grading"}),
+        )
+
     def test_collection_sample_options_can_exclude_cart(self) -> None:
         with patch.dict(
             os.environ,

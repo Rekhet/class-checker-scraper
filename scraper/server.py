@@ -104,7 +104,16 @@ def _run_refresh(years, terms):
         try:
             REFRESH.update(running=True, error=None, result=None, progress={})
             log.info("refresh start years=%s terms=%s", years, terms or "all")
-            out = crawl.refresh_all(conn, years, terms=terms or None, progress=progress)
+            full = crawl.DEFAULT_FULL_COMPONENTS
+            out = crawl.refresh_all(
+                conn,
+                years,
+                terms=terms or None,
+                collect_cart="cart" in full,
+                collect_enrollment="enrollment" in full,
+                collect_grading="grading" in full,
+                progress=progress,
+            )
             REFRESH["result"] = out
             log.info("refresh done: %s", out)
         except Exception as e:  # noqa: BLE001 - surfaced to the admin UI

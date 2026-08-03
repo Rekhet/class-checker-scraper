@@ -6,7 +6,10 @@ import stat
 import subprocess
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
+
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +21,27 @@ def _executable(path: Path, content: str) -> None:
 
 
 class PublishScriptTests(unittest.TestCase):
+    def test_refresh_script_defaults_to_non_cart_full_collection(self) -> None:
+        env = os.environ.copy()
+        env.update({
+            "DRY_RUN": "1",
+            "PY": str(ROOT / ".venv/bin/python"),
+        })
+        result = subprocess.run(
+            ["bash", str(ROOT / "refresh.sh"), "--year", "2026", "fall"],
+            cwd=ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "--collect catalog,enrollment,grading",
+            result.stdout,
+        )
+
     def test_counts_publisher_targets_the_web_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
@@ -118,6 +142,18 @@ class PublishScriptTests(unittest.TestCase):
                              "refresh YEAR=2099 SEM=spring "
                              "COLLECT=catalog,enrollment,grading")
 
+            env["UPDATE_COLLECTIONS"] = "CATALOG,CART"
+            uppercase_blocked = subprocess.run(
+                ["bash", str(scripts / "update.sh")],
+                cwd=project,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(uppercase_blocked.returncode, 2)
+            self.assertIn("cannot collect cart", uppercase_blocked.stderr)
+
             env["UPDATE_COLLECTIONS"] = "cart"
             blocked = subprocess.run(
                 ["bash", str(scripts / "update.sh")],
@@ -153,6 +189,25 @@ class PublishScriptTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--collect cart --windowed fall", result.stdout)
+
+    def test_admin_full_refresh_explicitly_excludes_cart(self) -> None:
+        import scraper.server as server
+
+        class FakeConnection:
+            def close(self) -> None:
+                pass
+
+        with patch.object(server.db, "connect", return_value=FakeConnection()), \
+             patch.object(server.db, "init_schema"), \
+             patch.object(server.process_lock, "ProcessLock",
+                          return_value=nullcontext()), \
+             patch.object(server.crawl, "refresh_all", return_value={}) as refresh:
+            server._run_refresh(["2026"], ["fall"])
+
+        kwargs = refresh.call_args.kwargs
+        self.assertFalse(kwargs["collect_cart"])
+        self.assertTrue(kwargs["collect_enrollment"])
+        self.assertTrue(kwargs["collect_grading"])
 
 
 if __name__ == "__main__":
