@@ -15,6 +15,21 @@ collection windows. Use `collect.env.example` as the schema for a future
 semester. Production Turso credentials and OAuth secrets remain local and are
 ignored by Git.
 
+## Start a bounded cart window
+
+```sh
+./scripts/start-cart-window \
+  --start-date 2026-08-04 \
+  --year 2026 \
+  --semester fall \
+  --timezone Asia/Seoul \
+  --disable-broad-timer
+```
+
+Use `--dry-run` to print the exact schedule without changing systemd. The
+launcher creates a collector timer for every ten minutes through the next
+day's 16:00 run and a cleanup timer at 16:10.
+
 ## Verification
 
 ```sh

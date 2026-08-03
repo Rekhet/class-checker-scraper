@@ -1,0 +1,11 @@
+[Unit]
+Description=SNU Class Checker bounded cart collection (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/project/class-checker
+EnvironmentFile=%h/.config/systemd/user/class-checker.cart-window-%i.env
+ExecStart=%h/project/class-checker/scripts/update-counts.sh
+TimeoutStartSec=20min

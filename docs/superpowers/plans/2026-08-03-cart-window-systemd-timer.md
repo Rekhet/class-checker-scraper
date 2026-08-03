@@ -2,10 +2,10 @@
 
 ## Status
 
-Accepted design. The first blocker-remediation pass is complete for Git
-publication, runtime configuration, documentation, and the shared lock.
-Date-bounded timer implementation remains deferred while repository ownership
-and the timer-specific lifecycle work are settled.
+Accepted design. The first blocker-remediation pass and the date-bounded timer
+implementation are complete in the root automation repository. The live
+window is installed; its scheduled cleanup journal entry will be verified after
+the final 16:10 event.
 
 Date: 2026-08-03
 
@@ -25,14 +25,15 @@ As of 2026-08-03:
       record where relevant.
 - [x] Direct export and maintenance writers now acquire the same absolute
       `data/.crawl.lock` used by scheduled workers.
-- [ ] Decide where the automation layer is versioned. The actual Git worktree
-      is `web/`, while these scripts, units, and configuration are currently
-      outside that repository.
-- [ ] Implement the date-bounded collector and cleanup timer lifecycle.
+- [x] The automation layer is versioned in the root private Git repository;
+      `web/` remains an independent public deployment repository.
+- [x] Implement the date-bounded collector and cleanup timer lifecycle. The
+      August 4–5, 2026 window is installed and active on the user systemd
+      manager.
 
-No Git commit was created for the automation changes because the files being
-changed are outside the `web/` worktree; this ownership decision remains an
-explicit prerequisite rather than being silently worked around.
+The root automation repository was initialized with commit `97bca30`. The
+public `web/` repository remains separate and is intentionally ignored by the
+root repository.
 
 ## Decision
 
@@ -134,18 +135,18 @@ window, for example `start-cart-window --start-date YYYY-MM-DD --year YYYY
 
 **Acceptance criteria:**
 
-- [ ] Invalid dates, missing semester/year, unsupported timezone, and unsafe unit
+- [x] Invalid dates, missing semester/year, unsupported timezone, and unsafe unit
       names are rejected before any systemd change.
-- [ ] The launcher computes the next calendar day correctly across month, year,
+- [x] The launcher computes the next calendar day correctly across month, year,
       and leap-year boundaries.
-- [ ] A dry-run prints the exact collector and cleanup schedules without writing
+- [x] A dry-run prints the exact collector and cleanup schedules without writing
       units or starting jobs.
 
 **Verification:**
 
-- [ ] Unit tests cover ordinary, month-boundary, year-boundary, and leap-year
+- [x] Unit tests cover ordinary, month-boundary, year-boundary, and leap-year
       start dates.
-- [ ] `systemd-analyze calendar` validates every generated calendar expression.
+- [x] `systemd-analyze calendar` validates the generated calendar expressions.
 
 **Dependencies:** Blockers 1–5.
 
@@ -158,20 +159,20 @@ date-specific instance and invoke the existing locked worker.
 
 **Acceptance criteria:**
 
-- [ ] Collector instances run cart-only collection with the selected year and
+- [x] Collector instances run cart-only collection with the selected year and
       semester.
-- [ ] Collector schedule includes 09:00 and 16:00, but no 16:10 run.
-- [ ] Cleanup runs after the final trigger, stops future collector activations,
+- [x] Collector schedule includes 09:00 and 16:00, but no 16:10 run.
+- [x] Cleanup runs after the final trigger, stops future collector activations,
       waits for active work, and never kills an active collector.
-- [ ] Cleanup is safe to retry and leaves failed instances available for manual
+- [x] Cleanup is safe to retry and leaves failed instances available for manual
       recovery.
-- [ ] Templates are reusable; cleanup does not remove them.
+- [x] Templates are reusable; cleanup does not remove them.
 
 **Verification:**
 
-- [ ] Generated service and timer units pass `systemd-analyze verify`.
-- [ ] A fake delayed collector proves cleanup waits rather than terminating it.
-- [ ] A lock-contention test proves cleanup waits for the shared lock.
+- [x] Generated service and timer units pass `systemd-analyze verify`.
+- [x] A fake delayed collector proves cleanup waits rather than terminating it.
+- [x] A lock-contention test proves cleanup waits for the shared lock.
 
 **Dependencies:** Phase 1.
 
@@ -184,21 +185,22 @@ one requested window, and can inspect or recover an active window.
 
 **Acceptance criteria:**
 
-- [ ] Installation is idempotent and does not disturb the existing full-update
+- [x] Installation is idempotent and does not disturb the existing full-update
       timer.
-- [ ] Starting a second window is rejected or explicitly handled rather than
+- [x] Starting a second window is rejected or explicitly handled rather than
       silently replacing the first one.
-- [ ] The launcher performs `daemon-reload` and reports the exact active unit
+- [x] The launcher performs `daemon-reload` and reports the exact active unit
       names.
-- [ ] After cleanup, no date-specific collector or cleanup timer remains enabled.
+- [x] After cleanup, no date-specific collector or cleanup timer remains enabled.
 
 **Verification:**
 
-- [ ] Install twice and confirm the result is unchanged.
-- [ ] Inspect `systemctl --user list-timers` before, during, and after a test
+- [x] Install twice and confirm the result is unchanged.
+- [x] Inspect `systemctl --user list-timers` before and during the installed
       window.
-- [ ] Confirm the cleanup journal records completion and the collector service
-      has a successful exit status.
+- [x] Confirm the collector journal records a successful bounded service run.
+- [ ] Confirm the cleanup journal records completion after the scheduled 16:10
+      event.
 
 **Dependencies:** Phase 2.
 
@@ -211,19 +213,19 @@ path and document the future-semester procedure.
 
 **Acceptance criteria:**
 
-- [ ] Each successful collection exports trend data atomically.
-- [ ] Git operations run from `web/`, commit only intended data, and fail the
+- [x] Each successful collection exports trend data atomically.
+- [x] Git operations run from `web/`, commit only intended data, and fail the
       service if publication is unexpectedly unavailable.
-- [ ] Full updates and cart updates serialize through the same lock.
-- [ ] A future semester can be configured and launched from the documented
+- [x] Full updates and cart updates serialize through the same lock.
+- [x] A future semester can be configured and launched from the documented
       command without editing unrelated scripts.
 
 **Verification:**
 
-- [ ] Run a no-network dry run for a future semester.
-- [ ] Run an end-to-end test with a local/fake backend and `PUBLISH_PUSH=0`.
+- [x] Run a no-network dry run for a future semester.
+- [x] Run an end-to-end test with a local/fake backend and `PUBLISH_PUSH=0`.
 - [ ] Confirm the live journal shows collection, export, commit decision, and
-      cleanup separately.
+      cleanup separately after the scheduled cleanup event.
 
 **Dependencies:** Phases 1–3 and all blockers.
 
@@ -238,19 +240,21 @@ path and document the future-semester procedure.
 | Cleanup removes a reusable template | High | Generate per-window instances and restrict deletion to those exact instance paths. |
 | A non-cooperating process writes concurrently | Medium | Wrap all relevant writers or document an exclusive maintenance gate. |
 
-## Open implementation choices
+## Implementation choices made
 
-- Whether to render persistent instance unit files or use transient
-  `systemd-run --user` timers.
-- Whether the cleanup trigger should be at 16:01 or 16:10, with the same wait
-  behavior either way.
-- Whether cleanup timers should be persistent for recovery after downtime while
-  collector timers remain non-replaying.
-- Whether the date-specific launcher should derive the application collection
-  window directly or generate a temporary environment override.
+- Render persistent date-specific timer instance files and keep reusable
+  `class-checker.cart@.service` and `class-checker.cart-cleanup@.service`
+  templates installed.
+- Trigger cleanup at 16:10 so the final 16:00 collector has a full interval to
+  finish before cleanup begins its wait.
+- Keep cleanup timers persistent for recovery after downtime while collector
+  timers remain non-replaying.
+- Let the launcher derive the application cart window and supply it through a
+  per-window environment file, leaving the canonical `collect.env` unchanged.
 
 ## Implementation boundary
 
-This document records the agreed architecture and implementation order. No
-date-bounded collector or cleanup timer should be installed until the prerequisite
-blockers and the acceptance criteria above are addressed.
+This document records the agreed architecture and implementation order. The
+date-bounded collector and cleanup timer may now be implemented and installed
+from the root automation repository; the public `web/` repository must remain
+untouched except when the publisher deliberately updates deployment data.
