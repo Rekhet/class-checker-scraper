@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maintenance · SNU Class Checker Docs</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<aside class="sidebar" id="sidebar"></aside>
+<main class="content">
+<article>
+
+  <h1>Maintenance</h1>
+  <p class="lead">Keeping the catalog fresh, recovering fall timing, backups, and the
+     handful of failure modes worth recognising.</p>
+
+  <h2 id="cadence">Refresh cadence</h2>
+  <p>Two passes, two rhythms — the server does <strong>not</strong> self-schedule; drive
+     these from <code>cron</code>, a timer, or the admin button.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Pass</th><th>Cost</th><th>Suggested cadence</th></tr>
+    <tr><td><strong>Full rebuild</strong> (Excel + timing)</td>
+        <td>Heavy — one Excel/term, plus a 168-cell sweep for not-yet-published terms</td>
+        <td>Daily, or whenever a timetable changes</td></tr>
+    <tr><td><strong>Counts-only</strong> overlay</td>
+        <td>Light — one paginated roster/term</td>
+        <td>Often during registration (e.g. every few minutes)</td></tr>
+  </table></div>
+  <pre><code><span class="cmt"># existing full update timer</span>
+systemctl --user enable --now class-checker.update.timer
+
+<span class="cmt"># fast cart/trend timer (install systemd/ units first)</span>
+systemctl --user enable --now class-checker.update-counts.timer</code></pre>
+  <div class="callout note"><span class="ic">⏱️</span>
+    <p>Both writers use the same host-local <code>data/.crawl.lock</code>, including
+       JSON export and Git publication. The fast timer checks <code>collect.env</code>
+       before opening a SNU session and publishes only the changed trend JSON plus
+       its class-index pointer.</p></div>
+
+  <h2 id="fall">Fall timing recovery</h2>
+  <p>Before SNU publishes a term's timetable into the Excel, its 수업교시 column is
+     empty. The crawl detects this (low Excel-timed ratio) and recovers
+     <strong>approximate</strong> timing from the live search cells (±30&nbsp;min on the
+     end). Nothing to do manually: once the Excel carries exact times, the next full
+     rebuild overrides the coarse blocks automatically. Track progress in the
+     <strong>time-assigned %</strong> panel.</p>
+
+  <h2 id="backup">Backups</h2>
+  <p>The catalog is a single file. Back it up by copying it (ideally while no crawl is
+     writing):</p>
+  <pre><code>cp data/classes.db  backups/classes-$(date +%F).db   <span class="cmt"># SQLite</span>
+cp data/turso.db    backups/turso-$(date +%F).db     <span class="cmt"># local libSQL</span></code></pre>
+  <p>A rebuild is always reproducible from SNU, so backups are convenience, not
+     safety. <code>crawl_runs</code> retains the history of every refresh.</p>
+
+  <h2 id="deps">Updating &amp; verifying</h2>
+  <pre><code><span class="cmt"># refresh dependencies after a pull</span>
+VIRTUAL_ENV=.venv uv pip install -e ".[turso,speed]"
+.venv/bin/playwright install chromium
+
+<span class="cmt"># health check</span>
+curl -s http://127.0.0.1:8011/api/status | python3 -m json.tool</code></pre>
+  <p><code>/api/status</code> returns the active <code>backend</code>, row counts, the last
+     crawl run, and live refresh progress — the quickest signal that things are healthy.</p>
+
+  <h2 id="trouble">Troubleshooting</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Symptom</th><th>Cause &amp; fix</th></tr>
+    <tr><td>Excel download is empty / 0 bytes</td>
+        <td>The EX request needs the full form + a valid term seed; an empty term (e.g. winter with no classes) legitimately returns nothing. A fresh session may hit an interstitial — the fetch re-mints and retries on missing <code>.xls</code> magic.</td></tr>
+    <tr><td><code>cc100ajax … non-JSON</code> / empty term list</td>
+        <td>The term-list call needs a seed term code (<code>SEED_SHTM</code>); a dropped session is re-minted on the next request.</td></tr>
+    <tr><td>Session mint fails</td>
+        <td>Run <code>playwright install chromium</code>. Minting visits the sugang home to collect <code>JSESSIONID</code> + <code>enter=Y</code>, then validates with a test POST.</td></tr>
+    <tr><td><code>database is locked</code></td>
+        <td>A crawl and the server are writing/holding the same local file. Stop the server during heavy rebuilds, or serve from a replica.</td></tr>
+    <tr><td>Refresh returns <code>401</code></td>
+        <td><code>ADMIN_TOKEN</code> is set — send it as the <code>X-Admin-Token</code> header.</td></tr>
+    <tr><td>Saved timetable shows old times</td>
+        <td>Reconciliation runs on load and after a refresh; reload the page, or trigger a refresh, to re-sync via <code>/api/lookup</code>.</td></tr>
+    <tr><td>2학기 (fall) shows few timed classes</td>
+        <td>Expected before SNU publishes fall times. Timing fills in from search cells and is upgraded to exact on later rebuilds.</td></tr>
+    <tr><td>Port already in use</td>
+        <td>Another server instance is running — change <code>PORT</code> or stop the old process.</td></tr>
+  </table></div>
+
+  <div class="callout tip"><span class="ic">📂</span>
+    <p>These docs are static — open <code>docs/index.html</code> in any browser, no server
+       needed. The dark/light toggle persists in <code>localStorage</code>.</p></div>
+
+  <div class="docfoot"><a href="api.html">← API &amp; Frontend</a><a href="index.html">Back to Overview →</a></div>
+
+</article>
+</main>
+<script src="docs.js"></script>
+</body>
+</html>

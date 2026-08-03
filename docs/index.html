@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview · SNU Class Checker Docs</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<aside class="sidebar" id="sidebar"></aside>
+<main class="content">
+<article>
+
+  <div class="hero">
+    <h1>SNU Class Checker</h1>
+    <p>A course-search tool for Seoul National University's sugang catalog: exact
+       per-class timetables, fast filters, and a drag-free temporary timetable —
+       built on a tiny stdlib server with a swappable SQLite&nbsp;/&nbsp;Turso backend.</p>
+    <div class="pills">
+      <span class="pill">Python stdlib HTTP</span>
+      <span class="pill">SQLite · Turso/libSQL</span>
+      <span class="pill">Playwright cookies</span>
+      <span class="pill">Vanilla JS UI</span>
+    </div>
+  </div>
+
+  <p class="lead">This site documents how the system is set up, how the crawl
+     collects and reconciles class data from three SNU sources, the database and
+     backend options, the HTTP API, and how to keep it all running.</p>
+
+  <h2 id="how">How it works</h2>
+  <p>The crawl pulls from three SNU endpoints with different strengths, merges
+     them into one catalog, and serves it to a vanilla-JS frontend.</p>
+
+  <svg class="diagram" viewBox="0 0 920 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Architecture data flow">
+    <defs>
+      <marker id="arw" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L7,3 L0,6 Z" style="fill:var(--muted)"/>
+      </marker>
+      <style>
+        .bx{fill:var(--panel);stroke:var(--line);stroke-width:1.5;rx:12}
+        .t{fill:var(--ink);font:600 13px system-ui,sans-serif}
+        .s{fill:var(--muted);font:500 11px system-ui,sans-serif}
+        .ln{stroke:var(--muted);stroke-width:1.6;fill:none}
+        .accent{fill:var(--brand)}
+      </style>
+    </defs>
+
+    <!-- column 1: SNU sources -->
+    <text x="40" y="34" class="s">SNU sugang.snu.ac.kr</text>
+    <rect class="bx" x="30" y="48"  width="200" height="58" rx="12"/>
+    <text x="44" y="72" class="t">Excel export (EX)</text>
+    <text x="44" y="92" class="s">catalog · exact 수업교시</text>
+    <rect class="bx" x="30" y="150" width="200" height="58" rx="12"/>
+    <text x="44" y="174" class="t">Search · time cells</text>
+    <text x="44" y="194" class="s">fallback timing</text>
+    <rect class="bx" x="30" y="252" width="200" height="58" rx="12"/>
+    <text x="44" y="276" class="t">Search · roster</text>
+    <text x="44" y="296" class="s">live cart / enrolment</text>
+
+    <!-- column 2: crawl -->
+    <rect class="bx" x="330" y="120" width="180" height="118" rx="14"/>
+    <text x="352" y="158" class="t">crawl.py</text>
+    <text x="352" y="180" class="s">merge + reconcile</text>
+    <text x="352" y="200" class="s accent">Excel overrides;</text>
+    <text x="352" y="216" class="s accent">cells fill gaps</text>
+
+    <!-- column 3: db -->
+    <rect class="bx" x="600" y="138" width="150" height="82" rx="12"/>
+    <text x="620" y="172" class="t">Database</text>
+    <text x="620" y="194" class="s">SQLite | Turso</text>
+
+    <!-- column 4: server + ui -->
+    <rect class="bx" x="790" y="92"  width="110" height="62" rx="12"/>
+    <text x="808" y="120" class="t">server.py</text>
+    <text x="808" y="138" class="s">JSON API</text>
+    <rect class="bx" x="790" y="204" width="110" height="62" rx="12"/>
+    <text x="816" y="232" class="t">web UI</text>
+    <text x="806" y="250" class="s">timetable</text>
+
+    <!-- arrows -->
+    <path class="ln" d="M230,77  C285,77 300,150 330,165" marker-end="url(#arw)"/>
+    <path class="ln" d="M230,179 L330,179" marker-end="url(#arw)"/>
+    <path class="ln" d="M230,281 C285,281 300,210 330,196" marker-end="url(#arw)"/>
+    <path class="ln" d="M510,179 L600,179" marker-end="url(#arw)"/>
+    <path class="ln" d="M750,170 C772,170 778,150 790,135" marker-end="url(#arw)"/>
+    <path class="ln" d="M845,154 L845,204" marker-end="url(#arw)"/>
+  </svg>
+
+  <div class="cards">
+    <div class="card"><div class="ic">🗂️</div><h3>Excel = source of truth</h3>
+      <p>One <code>.xls</code> per term gives the full roster + exact
+         <code>요일(HH:MM~HH:MM)</code> blocks. Authoritative when present.</p></div>
+    <div class="card"><div class="ic">🧭</div><h3>Search fills the gaps</h3>
+      <p>When the Excel timetable hasn't landed (e.g. fall), per-cell search
+         queries recover approximate timing.</p></div>
+    <div class="card"><div class="ic">⚡</div><h3>Live counts overlay</h3>
+      <p>Cart &amp; enrolment numbers lag in the Excel, so they are re-polled from
+         the live search HTML.</p></div>
+  </div>
+
+  <h2 id="explore">Explore the docs</h2>
+  <div class="cards">
+    <a class="card" href="setup.html"><div class="ic">▸</div><h3>Setup &amp; Run</h3>
+      <p>Virtualenv, dependencies, Playwright, and starting the server.</p></a>
+    <a class="card" href="crawl.html"><div class="ic">⟳</div><h3>Crawling &amp; Data</h3>
+      <p>The three sources, the timing merge, CLI flags, and refresh modes.</p></a>
+    <a class="card" href="database.html"><div class="ic">▤</div><h3>Database &amp; Turso</h3>
+      <p>Schema, the SQLite⇄Turso adapter, env vars, and migration.</p></a>
+    <a class="card" href="api.html"><div class="ic">⇄</div><h3>API &amp; Frontend</h3>
+      <p>Every endpoint and the UI features that consume them.</p></a>
+    <a class="card" href="maintenance.html"><div class="ic">✦</div><h3>Maintenance</h3>
+      <p>Refresh cadence, fall-time recovery, backups, troubleshooting.</p></a>
+  </div>
+
+  <h2 id="layout">Project layout</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Path</th><th>Role</th></tr>
+    <tr><td><code>scraper/server.py</code></td><td>stdlib HTTP server: JSON API + static frontend</td></tr>
+    <tr><td><code>scraper/crawl.py</code></td><td>orchestrates Excel + search-cell + counts into the DB</td></tr>
+    <tr><td><code>scraper/excel.py</code></td><td>downloads + parses the EX export (exact timing/roster)</td></tr>
+    <tr><td><code>scraper/parse.py</code></td><td>parses search HTML for live cart/enrolment counts</td></tr>
+    <tr><td><code>scraper/slots.py</code></td><td>generates the 168 time-cell query codes</td></tr>
+    <tr><td><code>scraper/db.py</code></td><td>schema + queries + the SQLite/Turso backend adapter</td></tr>
+    <tr><td><code>scraper/session.py</code></td><td>mints sugang cookies via Playwright</td></tr>
+    <tr><td><code>scraper/migrate_to_turso.py</code></td><td>copies the local catalog into Turso/libSQL</td></tr>
+    <tr><td><code>web/</code></td><td><code>index.html</code>, <code>app.js</code>, <code>styles.css</code> — the UI</td></tr>
+    <tr><td><code>data/</code></td><td><code>classes.db</code> (SQLite) / <code>turso.db</code> (local libSQL)</td></tr>
+  </table></div>
+
+  <div class="docfoot"><span>SNU Class Checker</span><a href="setup.html">Next: Setup &amp; Run →</a></div>
+
+</article>
+</main>
+<script src="docs.js"></script>
+</body>
+</html>

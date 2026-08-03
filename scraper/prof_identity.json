@@ -1,0 +1,10 @@
+{
+  "merges": [
+    {
+      "canonical": "c4040e55-9b4a-5671-bd6e-72d630afa040",
+      "members": ["1b683543-f316-52bf-ba77-274ec73dc5fc"],
+      "note": "최재원 deptless 자율세미나/자율연구(054.xxx) = 경제학부 최재원 (user-confirmed 2026-07-01)"
+    }
+  ],
+  "splits": []
+}

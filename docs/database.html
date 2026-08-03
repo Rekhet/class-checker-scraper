@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Database &amp; Turso · SNU Class Checker Docs</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<aside class="sidebar" id="sidebar"></aside>
+<main class="content">
+<article>
+
+  <h1>Database &amp; Turso</h1>
+  <p class="lead">One catalog, two interchangeable backends. Everything talks to the
+     connection returned by <code>db.connect()</code>; switching SQLite ⇄ Turso/libSQL
+     is a single environment variable and lives entirely in <code>db.py</code>.</p>
+
+  <h2 id="adapter">The backend adapter</h2>
+  <p><code>db.connect()</code> resolves a backend from <code>DB_BACKEND</code> and returns a
+     thin wrapper so the rest of the code is backend-blind:</p>
+  <ul>
+    <li><strong>Rows are normalised.</strong> SQLite rows support name access; libSQL
+        returns bare tuples with no <code>row_factory</code>. The adapter wraps both so
+        every row supports index <em>and</em> name access and is <code>dict()</code>-able —
+        identical to <code>sqlite3.Row</code>.</li>
+    <li><strong>One uniform connection</strong> exposes <code>execute</code>,
+        <code>executemany</code>, <code>executescript</code>, <code>commit</code>,
+        <code>close</code>, and <code>sync</code> over either driver.</li>
+    <li><strong>Only <code>db.py</code> imports a driver.</strong> <code>crawl.py</code> and
+        <code>server.py</code> never know which backend is live.</li>
+  </ul>
+  <div class="callout tip"><span class="ic">🔎</span>
+    <p><code>GET /api/status</code> reports the active backend (<code>sqlite</code> or
+       <code>libsql</code>), shown in the UI status bar as <code>DB&nbsp;…</code>.</p></div>
+
+  <h2 id="modes">Connection modes</h2>
+  <p>All driven by <code>DB_BACKEND</code> + <code>TURSO_*</code>:</p>
+  <div class="table-wrap"><table>
+    <tr><th>Mode</th><th>Environment</th></tr>
+    <tr><td>SQLite (default)</td><td><em>nothing</em> — uses <code>data/classes.db</code></td></tr>
+    <tr><td><strong>Local Turso</strong> (libSQL file, no daemon)</td>
+        <td><code>DB_BACKEND=turso</code> · <code>TURSO_DATABASE_URL=data/turso.db</code></td></tr>
+    <tr><td>Local <code>turso dev</code> server</td>
+        <td><code>TURSO_DATABASE_URL=http://127.0.0.1:8080</code></td></tr>
+    <tr><td>Remote Turso (cloud)</td>
+        <td><code>TURSO_DATABASE_URL=libsql://…</code> · <code>TURSO_AUTH_TOKEN=…</code></td></tr>
+    <tr><td>Embedded replica</td>
+        <td>remote URL + token + <code>TURSO_SYNC_PATH=data/replica.db</code></td></tr>
+  </table></div>
+
+  <h2 id="schema">Schema</h2>
+  <p>Created automatically by <code>init_schema()</code> on first connect.</p>
+
+  <h3 id="t-classes">classes</h3>
+  <p>One row per class. <code>classification</code> is a JSON array of the 과정 (level) and
+     이수구분 (type) tags, e.g. <code>["학사","전선"]</code>.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Column</th><th>Notes</th></tr>
+    <tr><td><code>id</code></td><td>primary key</td></tr>
+    <tr><td><code>term, year, shtm_fg, deta_shtm_fg</code></td><td>semester identity</td></tr>
+    <tr><td><code>sbjt_cd, lt_no, subh_cd</code></td><td>course / lecture / sub numbers</td></tr>
+    <tr><td><code>name, professor, department</code></td><td>display fields</td></tr>
+    <tr><td><code>classification</code></td><td>JSON array (level + type)</td></tr>
+    <tr><td><code>credits, quota, applied, enrolled</code></td><td>counts (applied/enrolled overlaid live)</td></tr>
+    <tr><td><code>grading, grading_switch</code></td><td>평가방식 (<code>A~F</code> / <code>S/U</code> / <code>S+/S/U</code>) + 전환가능여부 (<code>Y</code>/<code>N</code>), tagged via filtered Excel sweeps</td></tr>
+    <tr><td colspan="2"><code>UNIQUE(year, shtm_fg, deta_shtm_fg, sbjt_cd, lt_no, subh_cd)</code></td></tr>
+  </table></div>
+
+  <h3 id="t-slots">class_slots</h3>
+  <p>One row per meeting block. <code>end_time</code> is exact from the Excel, or the
+     coalesced cell end (<code>last cell + 30 min</code>) for search-recovered timing.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Column</th><th>Notes</th></tr>
+    <tr><td><code>class_id</code></td><td>FK → <code>classes(id)</code>, cascade delete</td></tr>
+    <tr><td><code>day_index</code></td><td>0 = Mon … 6 = Sun</td></tr>
+    <tr><td><code>period</code></td><td>derived: start hour − 8 (08:00 → 0)</td></tr>
+    <tr><td><code>start_time, end_time</code></td><td><code>"09:00"</code>, <code>"10:15"</code></td></tr>
+    <tr><td colspan="2"><code>UNIQUE(class_id, day_index, start_time, end_time)</code></td></tr>
+  </table></div>
+
+  <h3 id="t-other">terms &amp; crawl_runs</h3>
+  <p><code>terms(term PK, year, label)</code> backs the semester selectors.
+     <code>crawl_runs(id, started_at, finished_at, status, message, terms, classes, slots)</code>
+     records each refresh for the status bar.</p>
+
+  <div class="callout note"><span class="ic">🧹</span>
+    <p>A refresh clears <strong>only the (year, term) catalogs it rebuilds</strong>
+       (<code>clear_terms</code>) — refreshing one semester never wipes the others.</p></div>
+
+  <h2 id="migrate">Migrating to Turso</h2>
+  <p>Source is always the local SQLite file; destination is whatever
+     <code>db.connect()</code> resolves from the environment. The copy is idempotent
+     (each table is cleared then refilled, ids preserved for FK integrity).</p>
+  <pre><code><span class="cmt"># local Turso file (no daemon, no cloud)</span>
+DB_BACKEND=turso TURSO_DATABASE_URL=data/turso.db \
+  .venv/bin/python scraper/migrate_to_turso.py
+
+<span class="cmt"># remote Turso</span>
+DB_BACKEND=turso TURSO_DATABASE_URL=libsql://&lt;db&gt;-&lt;org&gt;.turso.io \
+  TURSO_AUTH_TOKEN=&lt;token&gt; \
+  .venv/bin/python scraper/migrate_to_turso.py</code></pre>
+  <p>Then start the server with the same environment. The migration refuses to run
+     if the destination resolves to SQLite, so it can't accidentally copy onto itself.</p>
+
+  <div class="callout warn"><span class="ic">🔒</span>
+    <p>A libSQL file is single-writer like SQLite. Don't run a crawl (which writes)
+       and serve from the same local file at the same instant — stop the server during
+       a heavy rebuild, or point the server at a replica.</p></div>
+
+  <div class="docfoot"><a href="crawl.html">← Crawling</a><a href="api.html">Next: API &amp; Frontend →</a></div>
+
+</article>
+</main>
+<script src="docs.js"></script>
+</body>
+</html>

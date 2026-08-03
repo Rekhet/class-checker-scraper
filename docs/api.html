@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API &amp; Frontend · SNU Class Checker Docs</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<aside class="sidebar" id="sidebar"></aside>
+<main class="content">
+<article>
+
+  <h1>API &amp; Frontend</h1>
+  <p class="lead">A small JSON API over the catalog, plus the vanilla-JS UI that
+     consumes it. The temporary timetable lives entirely in the browser
+     (<code>localStorage</code>); the server is stateless about it.</p>
+
+  <h2 id="read">Read endpoints</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Endpoint</th><th>Returns</th></tr>
+    <tr><td><span class="badge get">GET</span> <code>/api/terms</code></td><td><code>{terms:[{term,year,label}]}</code></td></tr>
+    <tr><td><span class="badge get">GET</span> <code>/api/departments</code></td><td><code>{departments:[…]}</code> — distinct names, for autocomplete</td></tr>
+    <tr><td><span class="badge get">GET</span> <code>/api/classifications</code></td><td><code>{classifications:[…]}</code> — 과정 + 이수구분 tags, most common first</td></tr>
+    <tr><td><span class="badge get">GET</span> <code>/api/timestats</code></td><td><code>{stats:[{term,label,total,timed,timeless}]}</code></td></tr>
+    <tr><td><span class="badge get">GET</span> <code>/api/status</code></td><td><code>{counts,last_run,backend,refresh}</code></td></tr>
+    <tr><td><span class="badge get">GET</span> <code>/api/search?…</code></td><td><code>{count,classes:[…]}</code> (each class carries its <code>slots</code>)</td></tr>
+  </table></div>
+
+  <h3 id="search">Search parameters</h3>
+  <p>All optional; combined with AND. Multi-value params repeat the key.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Param</th><th>Meaning</th></tr>
+    <tr><td><code>term</code></td><td>semester cmmnCd</td></tr>
+    <tr><td><code>name, professor, department</code></td><td>substring (LIKE) match</td></tr>
+    <tr><td><code>classification</code> ✳</td><td>이수구분 tag(s) — OR within, e.g. <code>전필</code>, <code>교양</code></td></tr>
+    <tr><td><code>level</code> ✳</td><td>과정 tag(s) — OR within, e.g. <code>학사</code>, <code>대학원</code></td></tr>
+    <tr><td><code>day</code></td><td>0 = Mon … 6 = Sun (matches a meeting block)</td></tr>
+    <tr><td><code>period</code></td><td>start hour − 8</td></tr>
+    <tr><td><code>limit</code></td><td>max rows (default 500)</td></tr>
+  </table></div>
+  <p>✳ <code>level</code> and <code>classification</code> are independent groups —
+     <strong>OR within a group, AND (intersection) between them</strong>. Example:
+     <code>?level=학사&amp;classification=전필&amp;classification=교양</code> → bachelor courses
+     that are major-required <em>or</em> general-ed.</p>
+  <pre><code><span class="cmt"># classes named "경제", bachelor, on Monday</span>
+curl 'http://127.0.0.1:8011/api/search?name=경제&level=학사&day=0'</code></pre>
+
+  <h2 id="refresh">Write / refresh endpoints</h2>
+  <p>Run a background crawl thread; poll <code>/api/status</code> for live progress.
+     Gated by <code>X-Admin-Token</code> when <code>ADMIN_TOKEN</code> is set.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Endpoint</th><th>Body</th><th>Action</th></tr>
+    <tr><td><span class="badge post">POST</span> <code>/api/refresh</code></td><td><code>{years,terms}</code></td><td>Full Excel rebuild + timing recovery + counts for the scoped terms</td></tr>
+    <tr><td><span class="badge post">POST</span> <code>/api/refresh-counts</code></td><td><code>{years,terms}</code></td><td>Fast counts-only overlay (no Excel, no cell sweep)</td></tr>
+    <tr><td><span class="badge post">POST</span> <code>/api/lookup</code></td><td><code>{keys:[[term,sbjt_cd,lt_no],…]}</code></td><td>Current records (with slots) for saved-timetable reconciliation</td></tr>
+  </table></div>
+
+  <h2 id="ui">Frontend features</h2>
+
+  <h3 id="filters">Search &amp; filters</h3>
+  <ul>
+    <li>Term, name, professor, day, period selectors.</li>
+    <li><strong>Department</strong> — type-ahead <code>&lt;datalist&gt;</code> over real department names.</li>
+    <li><strong>과정 (Level)</strong> and <strong>이수구분 (Type)</strong> — independent checkbox dropdowns; OR within, intersection between.</li>
+    <li>Each result shows classification chips and either its time ranges or a <strong>시간미정 TBA</strong> chip.</li>
+  </ul>
+
+  <h3 id="timetable">Proportional timetable</h3>
+  <ul>
+    <li>Blocks are positioned by start time with <strong>height proportional to duration</strong> — a 90-minute class visibly spans 90 minutes.</li>
+    <li>Overlapping classes on a day split into <strong>side-by-side lanes</strong> and get a conflict outline.</li>
+    <li>Each block shows the exact <code>09:00~10:15</code>; click to remove.</li>
+    <li>Time-less (TBA) classes you add are listed beneath the grid rather than placed.</li>
+    <li>The whole timetable persists in <code>localStorage</code> and can be cleared.</li>
+  </ul>
+
+  <h3 id="reconcile">Live reconciliation</h3>
+  <p>On page load and after any refresh, the saved timetable is reconciled against
+     the catalog via <code>/api/lookup</code>: changed meeting times are corrected and
+     flagged <strong>시간 변경</strong>, cancelled classes are flagged <strong>폐강</strong>,
+     and a banner summarises what moved.</p>
+
+  <h3 id="timestats">Time-assigned stats</h3>
+  <p>A dedicated panel shows the share of classes that have a scheduled time, per
+     semester (or all) — a quick read on how complete a term's timetable is. Fall
+     starts low (timetable not yet published) and climbs as SNU fills it in.</p>
+
+  <h3 id="admin">Admin refresh</h3>
+  <p>Pick a semester (or 전체 All) and press <em>DB 새로고침</em>. A progress bar streams
+     the Excel download, cell sweep, and count overlay phases; on completion the
+     search results, stats, and saved timetable all refresh.</p>
+
+  <div class="docfoot"><a href="database.html">← Database</a><a href="maintenance.html">Next: Maintenance →</a></div>
+
+</article>
+</main>
+<script src="docs.js"></script>
+</body>
+</html>

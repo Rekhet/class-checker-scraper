@@ -1,0 +1,45 @@
+[project]
+name = "class-checker"
+version = "1.0.0"
+description = "SNU sugang course search with exact per-class timing (Excel export), SQLite/Turso catalog, and a stdlib web UI + temporary timetable."
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "toxiclemon" }]
+
+# Runtime dependencies. requests for HTTP, xlrd to read the .xls course export
+# (exact 수업교시 timing + roster), beautifulsoup4 to parse the live search HTML
+# for the fast-moving cart/enrollment counts the Excel lags on (parse.py), and
+# playwright to mint sugang session cookies. The server + DB layer are stdlib.
+dependencies = [
+    "requests>=2.31",
+    "xlrd>=2.0",
+    "beautifulsoup4>=4.12",
+    "playwright>=1.40",
+]
+
+[project.optional-dependencies]
+# Faster HTML parsing for parse.py (auto-used if importable, else html.parser).
+speed = ["lxml>=5.0"]
+# Turso / libSQL backend. Switch with DB_BACKEND=turso + TURSO_DATABASE_URL
+# (+ TURSO_AUTH_TOKEN for remote). Without this extra the default SQLite backend
+# is used.
+turso = ["libsql>=0.1"]
+# Browser binary for Playwright is installed separately, not via pip:
+#   playwright install chromium
+dev = []
+export = [
+    "openpyxl>=3.1",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# Flat modules live under scraper/ and import each other by top-level name
+# (import db, import crawl, ...). Map that directory so the project stays
+# importable when installed in editable mode for development.
+[tool.setuptools]
+py-modules = ["crawl", "db", "excel", "migrate_to_turso", "parse", "process_lock", "server", "session"]
+
+[tool.setuptools.package-dir]
+"" = "scraper"

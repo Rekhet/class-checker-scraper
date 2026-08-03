@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crawling &amp; Data · SNU Class Checker Docs</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<aside class="sidebar" id="sidebar"></aside>
+<main class="content">
+<article>
+
+  <h1>Crawling &amp; Data</h1>
+  <p class="lead">Three SNU endpoints, each fresh on a different axis. The crawl
+     merges them so the catalog is complete, the timing is as exact as available,
+     and the volatile counts are as live as possible.</p>
+
+  <h2 id="sources">The three sources</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Source</th><th>Endpoint</th><th>Gives</th><th>Freshness</th></tr>
+    <tr><td><strong>Excel</strong></td><td><code>cc100InterfaceExcel.action</code> · <code>workType=EX</code></td>
+        <td>Full roster + exact <code>요일(HH:MM~HH:MM)</code> timing + metadata</td>
+        <td>Lags (esp. timing for a not-yet-published term; counts stale)</td></tr>
+    <tr><td><strong>Search cells</strong></td><td><code>cc100InterfaceSrch.action</code> · per <code>srchOpenSbjtTm</code></td>
+        <td>Which classes sit in each ½-hour day/period cell → coarse timing</td>
+        <td>Fresh, but coarse (½-hour granularity, no exact end)</td></tr>
+    <tr><td><strong>Search roster</strong></td><td><code>cc100InterfaceSrch.action</code> · <code>workType=S</code></td>
+        <td>Every class + live 장바구니/수강신청인원 counts</td>
+        <td>Fresh counts; rows carry no per-class time</td></tr>
+  </table></div>
+
+  <h2 id="timing">Timing: Excel overrides, search fills gaps</h2>
+  <p>Timing is merged <strong>per class</strong>:</p>
+  <ul>
+    <li>If the Excel has a time for a class → use the <strong>exact</strong> Excel blocks (start <em>and</em> end). Excel always wins.</li>
+    <li>If the Excel time is <strong>empty</strong> → fall back to search-cell timing.</li>
+    <li>If neither has a time → the class is <strong>시간미정 (TBA)</strong> and carries no slots.</li>
+  </ul>
+
+  <div class="callout note"><span class="ic">⚙️</span>
+    <p>The cell sweep is <strong>gated</strong>: it only runs for a term when the Excel
+       has times for fewer than <strong>50%</strong> of its classes (the timetable
+       hasn't landed in the Excel yet — typically fall). Above that, the Excel-time-less
+       classes are genuinely time-less (online / research) and never appear in cells,
+       so sweeping would be pure waste. Tune with <code>SEARCH_TIMING_MAX_RATIO</code>.</p></div>
+
+  <h3 id="coalesce">How cell timing is built</h3>
+  <p>A class that meets across several ½-hour cells is returned by several cell
+     queries. Those cells are <strong>coalesced</strong> per day: contiguous 30-minute
+     steps merge into a block, and a block's end is the last cell's start <code>+ 30 min</code>.
+     The result is approximate (±30&nbsp;min on the end) but places the class on the
+     right day and rough time — and is automatically replaced by the exact Excel
+     time on the next refresh once SNU publishes it.</p>
+
+  <h2 id="counts">Counts overlay</h2>
+  <p>Cart (<code>장바구니신청</code>) and enrolment (<code>수강신청인원</code>) move quickly
+     and the Excel lags on them, so after the Excel/timing pass the crawl paginates
+     the term's search roster and overlays <strong>only</strong> the count columns —
+     identity, timing, professor, credits stay as the Excel wrote them. This pass can
+     also be run on its own as a fast, frequent update between heavy Excel rebuilds.</p>
+
+  <h2 id="grading">평가방식 tagging (filtered Excel sweeps)</h2>
+  <p>평가방식 (성적부여형태: <code>A~F</code> / <code>S/U</code> / <code>S+/S/U</code>) and
+     평가방식 전환가능여부 appear <strong>nowhere</strong> as columns — not in the Excel, not in the
+     search-result items; only the per-class detail popup shows them. But both endpoints
+     <em>filter</em> on them (<code>srchMrksGvMthd</code> /
+     <code>srchMrksApprMthdChgPosbYn</code>), so <code>refresh_grading()</code> downloads the
+     Excel <strong>once per filter value</strong> (3 + 1 downloads per term) and tags each class
+     by set membership. The three 성적부여형태 codes partition the roster exactly, so coverage
+     is 100%. Runs at the end of every <code>crawl_term()</code> (the rebuild wipes the tags with
+     the rows) and stand-alone via <code>crawl.py --grading-only</code> for backfilling past
+     semesters. The HTML search can't do this sweep — it is hard-capped at 10 rows per page.</p>
+
+  <h2 id="trend-windows">인원 추이 collection windows</h2>
+  <p>The 인원 추이 (enrolment-trend) chart is a time series: every counts pass appends
+     one <code>count_samples</code> row per class (<code>a</code>=applied 장바구니,
+     <code>e</code>=enrolled 수강인원). Sampling is gated by <strong>collection
+     windows</strong> in the project-root <code>collect.env</code> (local runtime
+     configuration, sourced by
+     <code>refresh.sh</code> and the server launcher) so the series only grows while the numbers actually move —
+     outside every window no row is written and the chart stays dark. Each metric takes
+     a <em>list</em> of windows (<code>CART_WINDOWS</code>, <code>ENROLL_WINDOWS</code>)
+     checked by <code>crawl.py:_in_windows()</code>, because enrolment moves in several
+     disjoint spans with long dead gaps between them.</p>
+
+  <div class="callout warn"><span class="ic">📅</span>
+    <p><strong>Source of truth = the sugang portal, not the 학사일정.</strong> The
+       university 학사일정 (<code>www.snu.ac.kr/academics/resources/calendar</code>) is
+       coarse — it collapses everything into "수강신청 08-04~11" and shows only the
+       September 변경. The real per-day schedule (the 예비 cycle, 확정 days, 개강전 변경)
+       is on <code>sugang.snu.ac.kr/sugang/co/co010.action</code> — the landing content,
+       whose HTTP GET returns the full 일정 table. Re-read it every semester.</p></div>
+
+  <h3 id="reg-phases">Registration phase state-machine</h3>
+  <p>Two independent cycles — a <strong>예비 (preliminary) round in late July</strong>
+     and the <strong>본 (main) round in August</strong> — each run 장바구니 담기 →
+     전산확정 → 선착순수강신청; then two <strong>개강전 변경</strong> days, then the
+     개강후 정정 week. The two volatile columns never move together; 확정 days and the
+     gaps between cycles move nothing. 2026-2학기 (from co010.action):</p>
+  <div class="table-wrap"><table>
+    <tr><th>Phase</th><th>2026-2 date</th><th>장바구니 (a)</th><th>수강인원 (e)</th><th>sample</th></tr>
+    <tr><td>예비장바구니 신청</td><td>07-28</td><td>moves, not collected</td><td>—</td><td>none</td></tr>
+    <tr><td>예비장바구니 전산확정</td><td>07-29</td><td>frozen</td><td>frozen</td><td>none</td></tr>
+    <tr><td>예비선착순수강신청 1–2일차</td><td>07-30 ~ 07-31</td><td>frozen</td><td><strong>moves</strong></td><td>ENROLL</td></tr>
+    <tr><td>장바구니신청 1–2일차</td><td>08-04 ~ 08-05</td><td><strong>moves</strong></td><td>—</td><td>CART</td></tr>
+    <tr><td>장바구니 전산확정</td><td>08-06</td><td>frozen</td><td>frozen</td><td>none</td></tr>
+    <tr><td>선착순수강신청 1–3일차</td><td>08-07, 10, 11</td><td>frozen</td><td><strong>moves</strong></td><td>ENROLL</td></tr>
+    <tr><td>수강신청변경 (개강전)</td><td>08-28, 08-31</td><td>frozen</td><td><strong>moves</strong></td><td>ENROLL</td></tr>
+    <tr><td>수강신청변경 (개강후/정정) · 정원외</td><td>09-01 ~ 09-09</td><td>frozen</td><td><strong>moves</strong></td><td>ENROLL</td></tr>
+    <tr><td>수강취소 (drip)</td><td>09-08 ~ 10-20</td><td>frozen</td><td>drops</td><td>none <sup>†</sup></td></tr>
+  </table></div>
+  <p><sup>†</sup> The 수강취소 tail is deliberately <strong>not</strong> collected: 42
+     days of slow drops at hourly sampling would overrun
+     <code>export_json.py</code>'s <code>TREND_WINDOW=240</code> and evict the
+     registration arc. Revisit (bigger cap / slower cadence) if the post-개강 drop-off
+     should show.</p>
+
+  <h3 id="window-config"><code>collect.env</code> mapping</h3>
+  <pre><code><span class="cmt"># 2026-2학기 — from sugang co010.action (read 2026-07-04). List item = "DAY" or "START..END".</span>
+	CART_WINDOWS=2026-08-04..2026-08-05
+ENROLL_WINDOWS=2026-07-30..2026-07-31,2026-08-07..2026-08-11,2026-08-28..2026-08-31,2026-09-01..2026-09-09</code></pre>
+  <div class="callout"><span class="ic">🧩</span>
+    <p><code>_in_windows()</code> samples on ANY match, so the configured 담기 span and the
+       four enrolment spans are captured while the 확정 days and the ~16-day
+       08-12~08-27 gap stay dark. If a <code>_WINDOWS</code> var is unset the crawler
+       falls back to the legacy single <code>CART_START/END</code> +
+       <code>ENROLL_START/END</code> window (behaviour unchanged).</p></div>
+
+  <h2 id="terms">Semester codes</h2>
+  <p>The <code>cmmnCd</code> term codes are year-independent (combine with a year):</p>
+  <div class="table-wrap"><table>
+    <tr><th>Semester</th><th>Code</th></tr>
+    <tr><td>1학기 · Spring</td><td><code>U000200001U000300001</code></td></tr>
+    <tr><td>2학기 · Fall</td><td><code>U000200002U000300001</code></td></tr>
+    <tr><td>여름학기 · Summer</td><td><code>U000200001U000300002</code></td></tr>
+    <tr><td>겨울학기 · Winter</td><td><code>U000200002U000300002</code></td></tr>
+  </table></div>
+  <div class="callout warn"><span class="ic">🪪</span>
+    <p>The Excel and term-list endpoints return an empty body unless a valid term
+       code seeds the request. A fresh session may also return an HTML interstitial
+       on the first hit — the fetch validates the <code>.xls</code> magic bytes and
+       re-mints + retries automatically.</p></div>
+
+  <h2 id="per-term">What a term refresh does</h2>
+  <ol class="steps">
+    <li>Wipe only this <code>(year, term)</code> — other semesters stay intact.</li>
+    <li>Download &amp; parse the Excel → upsert every class with exact timing.</li>
+    <li>If Excel timing is largely missing, sweep the 168 search cells (concurrently) and attach coarse timing to the time-less classes.</li>
+    <li>Paginate the search roster and overlay live cart/enrolment counts.</li>
+  </ol>
+
+  <h2 id="cli">Command-line crawler</h2>
+  <pre><code><span class="cmt"># full rebuild of one term (Excel + timing + counts)</span>
+.venv/bin/python scraper/crawl.py --years 2026 --terms U000200002U000300001
+
+<span class="cmt"># all of a year's terms</span>
+.venv/bin/python scraper/crawl.py --years 2026
+
+<span class="cmt"># fast counts-only pass (no Excel, no cell sweep)</span>
+.venv/bin/python scraper/crawl.py --counts-only --terms U000200002U000300001</code></pre>
+
+  <div class="table-wrap"><table>
+    <tr><th>Flag</th><th>Effect</th></tr>
+    <tr><td><code>--years</code></td><td>Comma-separated years (default <code>2026</code>).</td></tr>
+    <tr><td><code>--terms</code></td><td>Comma-separated cmmnCd subset; blank = all terms of the year.</td></tr>
+    <tr><td><code>--counts-only</code></td><td>Skip Excel + cell sweep; only refresh live enrolment counts.</td></tr>
+    <tr><td><code>--cart-only</code></td><td>With <code>--counts-only</code>, update and sample 장바구니 only.</td></tr>
+    <tr><td><code>--windowed</code></td><td>With <code>--counts-only</code>, skip before any network work when the configured collection window is inactive.</td></tr>
+    <tr><td><code>--no-counts</code></td><td>Excel (+ timing recovery) only; skip the count overlay.</td></tr>
+    <tr><td><code>--no-search-timing</code></td><td>Skip the cell sweep even when the Excel timing is missing.</td></tr>
+    <tr><td><code>--workers</code></td><td>Concurrent cell fetchers for the timing sweep (default <code>6</code>).</td></tr>
+  </table></div>
+
+  <p>The same operations run from the UI/admin and over HTTP — see
+     <a href="api.html#refresh">API &amp; Frontend → Refresh endpoints</a>. To prevent a
+     counts pass from racing a full rebuild, all DB-writing crawls share one lock.</p>
+
+  <div class="docfoot"><a href="setup.html">← Setup</a><a href="database.html">Next: Database &amp; Turso →</a></div>
+
+</article>
+</main>
+<script src="docs.js"></script>
+</body>
+</html>

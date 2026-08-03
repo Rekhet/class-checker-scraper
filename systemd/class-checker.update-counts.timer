@@ -1,0 +1,11 @@
+[Unit]
+Description=Every-10-minute SNU Class Checker cart/trend update
+
+[Timer]
+# Start at :10, :20, ... so the hourly full refresh at :00 gets first access;
+# the shared lock remains the correctness mechanism if runtimes overlap.
+OnCalendar=Mon..Fri *-*-* 09..20:10/10
+Persistent=true
+
+[Install]
+WantedBy=timers.target

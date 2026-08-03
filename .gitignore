@@ -1,0 +1,49 @@
+# The deployment site is a separate public Git repository.
+/web/
+
+# Local tooling and generated Python artifacts.
+/.venv/
+/.agents/
+/.codex/
+/.claude/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Graph/indexing output and scratch directories.
+/graphify-out/
+/docs/graphify-out/
+/_scrape/
+/tmp/
+/data/grad_req/_scrape/
+
+# Runtime databases, crawl state, logs, and fetched source artifacts.
+/data/*.db
+/data/*.db-*
+/data/.crawl.lock
+/data/logs/
+/data/root.html
+/data/sample_excel.bin
+/data/trend_archive_pre2026/
+
+# Credentials and machine-local environment files. The semester/window
+# configuration is intentionally tracked in the private automation repository.
+/prod.env
+/prod-admin.env
+/google_oauth_secret.json
+.env
+.env.*
+!/collect.env
+!/collect.env.example
+
+# Local request/response captures, not application source.
+/cc100ajax.json
+/form2.txt
+/page2.txt
+/sample_response.txt
+/search_form.txt
+
+# Common editor and OS files.
+.DS_Store
+*.swp
+*~

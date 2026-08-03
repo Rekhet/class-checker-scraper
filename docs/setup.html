@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setup &amp; Run · SNU Class Checker Docs</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<aside class="sidebar" id="sidebar"></aside>
+<main class="content">
+<article>
+
+  <h1>Setup &amp; Run</h1>
+  <p class="lead">Get from a clean checkout to a running server in five steps.
+     The web server and database layer are pure standard library; only crawling
+     needs third-party packages.</p>
+
+  <h2 id="prereq">Prerequisites</h2>
+  <ul>
+    <li><strong>Python ≥ 3.9</strong> (developed on 3.14).</li>
+    <li><strong>A package installer</strong> — <code>uv</code> (used here) or <code>pip</code>.</li>
+    <li><strong>A browser for Playwright</strong> — Chromium, installed once (below).
+        Needed only to mint sugang session cookies for crawling.</li>
+  </ul>
+
+  <h2 id="install">Install</h2>
+  <ol class="steps">
+    <li><strong>Create the virtual environment.</strong>
+      <pre><code>python3 -m venv .venv</code></pre></li>
+    <li><strong>Install runtime dependencies.</strong> With <code>uv</code>:
+      <pre><code><span class="cmt"># requests · xlrd · beautifulsoup4 · playwright</span>
+VIRTUAL_ENV=.venv uv pip install -e .
+
+<span class="cmt"># optional extras</span>
+VIRTUAL_ENV=.venv uv pip install -e ".[turso]"   <span class="cmt"># libSQL backend</span>
+VIRTUAL_ENV=.venv uv pip install -e ".[speed]"   <span class="cmt"># lxml (faster HTML parse)</span></code></pre>
+      With plain pip: <code>.venv/bin/pip install -e .</code>.</li>
+    <li><strong>Install the Chromium browser</strong> Playwright drives to mint cookies.
+      <pre><code>.venv/bin/playwright install chromium</code></pre></li>
+    <li><strong>Start the server.</strong>
+      <pre><code>PORT=8011 .venv/bin/python scraper/server.py</code></pre></li>
+    <li><strong>Open the UI</strong> at <code>http://127.0.0.1:8011</code>.</li>
+  </ol>
+
+  <div class="callout tip"><span class="ic">💡</span>
+    <p>The DB schema is created automatically on first connection — no migration
+       step. A fresh DB simply has zero classes until the first crawl.</p></div>
+
+  <h2 id="firstcrawl">First crawl</h2>
+  <p>The catalog is empty until you populate it. Two ways:</p>
+  <ul>
+    <li><strong>From the UI</strong> — open the <em>관리자 / Admin</em> panel, pick a
+        semester (or 전체 All), press <em>DB 새로고침</em>. Progress streams live.</li>
+    <li><strong>From the CLI</strong> — scoped to one term is fastest:
+      <pre><code>.venv/bin/python scraper/crawl.py --years 2026 \
+  --terms U000200002U000300001</code></pre></li>
+  </ul>
+  <p>See <a href="crawl.html">Crawling &amp; Data</a> for what each pass does and how
+     long it takes.</p>
+
+  <h2 id="env">Environment variables</h2>
+  <p>All optional — sensible defaults apply. Set them in the shell before launching
+     the server or the crawler.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+    <tr><td><span class="badge env">PORT</span></td><td><code>8000</code></td><td>HTTP listen port (loopback only).</td></tr>
+    <tr><td><span class="badge env">ADMIN_TOKEN</span></td><td><em>unset</em></td><td>If set, refresh endpoints require header <code>X-Admin-Token</code>.</td></tr>
+    <tr><td><span class="badge env">DB_BACKEND</span></td><td><code>sqlite</code></td><td><code>sqlite</code> or <code>turso</code> (libSQL).</td></tr>
+    <tr><td><span class="badge env">TURSO_DATABASE_URL</span></td><td><em>unset</em></td><td>libSQL target: a local file path, <code>file:…</code>, <code>libsql://…</code>, or <code>http://127.0.0.1:8080</code>.</td></tr>
+    <tr><td><span class="badge env">TURSO_AUTH_TOKEN</span></td><td><em>unset</em></td><td>Auth token for a remote Turso database.</td></tr>
+    <tr><td><span class="badge env">TURSO_SYNC_PATH</span></td><td><em>unset</em></td><td>Local replica file for an embedded-replica setup.</td></tr>
+    <tr><td><span class="badge env">CRAWL_YEARS</span></td><td><code>2026</code></td><td>Default year scope for server-triggered crawls.</td></tr>
+    <tr><td><span class="badge env">CRAWL_TERMS</span></td><td><em>all</em></td><td>Default term scope (comma-separated cmmnCd).</td></tr>
+  </table></div>
+
+  <h2 id="run-turso">Run against local Turso</h2>
+  <p>Once migrated (see <a href="database.html">Database &amp; Turso</a>), point the
+     server at the libSQL file — the only change is the environment:</p>
+  <pre><code>DB_BACKEND=turso TURSO_DATABASE_URL=data/turso.db \
+  PORT=8011 .venv/bin/python scraper/server.py</code></pre>
+  <p>The status bar then reports <code>DB libsql</code>. With no env set it stays on
+     SQLite (<code>data/classes.db</code>).</p>
+
+  <div class="docfoot"><a href="index.html">← Overview</a><a href="crawl.html">Next: Crawling &amp; Data →</a></div>
+
+</article>
+</main>
+<script src="docs.js"></script>
+</body>
+</html>
