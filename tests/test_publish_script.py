@@ -61,7 +61,9 @@ class PublishScriptTests(unittest.TestCase):
                 "[ \"$4\" = \"--cached\" ] && [ \"$5\" = \"--quiet\" ]; then\n"
                 "  exit 1\n"
                 "fi\n"
-                "if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"rev-parse\" ]; then\n"
+                "if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"rev-list\" ]; then\n"
+                "  printf '1\\n'\n"
+                "elif [ \"$1\" = \"-C\" ] && [ \"$3\" = \"rev-parse\" ]; then\n"
                 "  printf '%s\\n' \"$2\"\n"
                 "elif [ \"$1\" = \"rev-parse\" ]; then\n"
                 "  pwd\n"
@@ -120,7 +122,9 @@ class PublishScriptTests(unittest.TestCase):
                 "[ \"$4\" = \"--cached\" ] && [ \"$5\" = \"--quiet\" ]; then\n"
                 "  exit 1\n"
                 "fi\n"
-                "if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"rev-parse\" ]; then\n"
+                "if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"rev-list\" ]; then\n"
+                "  printf '1\\n'\n"
+                "elif [ \"$1\" = \"-C\" ] && [ \"$3\" = \"rev-parse\" ]; then\n"
                 "  printf '%s\\n' \"$2\"\n"
                 "elif [ \"$1\" = \"rev-parse\" ]; then\n"
                 "  pwd\n"
@@ -152,6 +156,63 @@ class PublishScriptTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("push", git_log.read_text(encoding="utf-8"))
+
+    def test_full_publisher_pushes_existing_local_commit_without_new_staged_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            scripts = project / "scripts"
+            scripts.mkdir()
+            shutil.copy2(ROOT / "scripts/publish.sh", scripts / "publish.sh")
+            (project / "web").mkdir()
+
+            fake_bin = project / "bin"
+            fake_bin.mkdir()
+            git_log = project / "git.log"
+            _executable(
+                fake_bin / "git",
+                "#!/bin/sh\n"
+                "printf '%s\\n' \"$*\" >> \"$PUBLISH_GIT_LOG\"\n"
+                "if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"diff\" ] && "
+                "[ \"$4\" = \"--cached\" ] && [ \"$5\" = \"--quiet\" ]; then\n"
+                "  exit 0\n"
+                "fi\n"
+                "if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"rev-parse\" ] && "
+                "[ \"$4\" = \"--show-toplevel\" ]; then\n"
+                "  printf '%s\\n' \"$2\"\n"
+                "elif [ \"$1\" = \"-C\" ] && [ \"$3\" = \"rev-parse\" ]; then\n"
+                "  printf 'origin/main\\n'\n"
+                "elif [ \"$1\" = \"-C\" ] && [ \"$3\" = \"rev-list\" ]; then\n"
+                "  printf '1\\n'\n"
+                "fi\n"
+                "exit 0\n",
+            )
+            fake_python = fake_bin / "python"
+            _executable(fake_python, "#!/bin/sh\nexit 0\n")
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{fake_bin}:{env['PATH']}",
+                    "PUBLISH_GIT_LOG": str(git_log),
+                    "PUBLISH_GIT": "1",
+                    "PUBLISH_PUSH": "1",
+                    "CLASS_CHECKER_PROCESS_LOCK_HELD": "1",
+                    "PY": str(fake_python),
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(scripts / "publish.sh"), "full"],
+                cwd=project,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = git_log.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(any(call.endswith("rev-list --count @{upstream}..HEAD") for call in calls))
+            self.assertTrue(any(call.endswith("push") for call in calls))
 
     def test_counts_wrapper_forces_commit_only_publication(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

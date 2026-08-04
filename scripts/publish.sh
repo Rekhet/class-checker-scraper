@@ -76,14 +76,41 @@ else
   git -C "$WEB_ROOT" add data/trend/ data/classes/index.json
 fi
 
+COMMITTED=0
 if git -C "$WEB_ROOT" diff --cached --quiet; then
-  echo "no data update to publish"
+  echo "no new data update to commit"
+else
+  git -C "$WEB_ROOT" commit -m "$MESSAGE"
+  COMMITTED=1
+fi
+
+if [ "$PUSH_ALLOWED" = "0" ]; then
+  if [ "$COMMITTED" = "1" ]; then
+    echo "trend commit retained locally; the hourly full update will push it"
+  else
+    echo "trend commits retained locally; the hourly full update will push them"
+  fi
   exit 0
 fi
 
-git -C "$WEB_ROOT" commit -m "$MESSAGE"
-if [ "$PUSH_ALLOWED" = "0" ]; then
-  echo "trend commit retained locally; the hourly full update will push it"
-elif [ "${PUBLISH_PUSH:-1}" != "0" ]; then
+if [ "${PUBLISH_PUSH:-1}" = "0" ]; then
+  echo "Git push disabled (PUBLISH_PUSH=0); local commits retained"
+  exit 0
+fi
+
+if ! AHEAD="$(git -C "$WEB_ROOT" rev-list --count '@{upstream}..HEAD' 2>/dev/null)"; then
+  echo "error: cannot determine whether '$WEB_ROOT' has commits ahead of its upstream" >&2
+  exit 1
+fi
+case "$AHEAD" in
+  ''|*[!0-9]*)
+    echo "error: invalid ahead-commit count from '$WEB_ROOT': '$AHEAD'" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$AHEAD" -gt 0 ]; then
   git -C "$WEB_ROOT" push
+else
+  echo "no local commits to push"
 fi
