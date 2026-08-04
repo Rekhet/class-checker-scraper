@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Read-only audit of catalog rows whose stored cart value is NULL.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+PY="${PY:-$ROOT/.venv/bin/python}"
+if [ -f "$ROOT/collect.env" ]; then
+  set -a
+  . "$ROOT/collect.env"
+  set +a
+fi
+export DB_BACKEND="${DB_BACKEND:-turso}"
+export TURSO_DATABASE_URL="${TURSO_DATABASE_URL:-data/turso.db}"
+
+exec "$PY" "$ROOT/scraper/audit_cart_counts.py" "$@"

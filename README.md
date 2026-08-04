@@ -13,6 +13,19 @@ The crawler accepts one shared collection interface:
 `catalog,enrollment,grading`, while a bounded cart window uses `cart`; selecting
 both live metric groups still performs one search pass per term.
 
+Live search results can carry a different `subh_cd` from the Excel catalog. The
+counts overlay resolves an exact identity first, then safely falls back to the
+unique `(sbjt_cd, lt_no)` catalog identity; ambiguous candidates are left
+untouched. Audit the active catalog with:
+
+```sh
+./scripts/audit-cart-counts --year 2026 --term fall --live
+```
+
+The audit is read-only. A stored `NULL` is expected outside a cart window; with
+`--live`, the report distinguishes site-side NULLs from live non-negative values
+that should have been stored.
+
 ## Configuration
 
 Review `collect.env` for the active semester, timezone, collection mode, and

@@ -242,6 +242,33 @@ class SnuClient:
                                                    page_size=page_size,
                                                    extra=extra)).text
 
+
+def fetch_live_classes(client: SnuClient, year: str, term: str, *,
+                       label: str = "", progress: ProgressFn | None = None,
+                       ) -> list[dict]:
+    """Fetch and parse every live search result for one term.
+
+    Keeping pagination in one helper ensures the counts updater and diagnostic
+    tools inspect the same complete roster and do not drift into separate page
+    limits or identity handling.
+    """
+    fetched: list[dict] = []
+    page = 1
+    while True:
+        res = parse.parse_response(client.search_page(year, term, page=page))
+        fetched.extend(res["classes"])
+        total = res["total"]
+        if progress:
+            progress({"phase": "counts", "term": term, "label": label,
+                      "slot_index": len(fetched),
+                      "slot_total": total or len(fetched),
+                      "slot_label": "수강인원 갱신"})
+        if res["page_count"] == 0 or len(fetched) >= total:
+            break
+        page += 1
+    return fetched
+
+
 def refresh_counts(conn, client: SnuClient, year: str, term: str, *,
                    label: str = "", progress: ProgressFn | None = None,
                    collect_cart: bool = True, collect_enrollment: bool = True,
@@ -260,19 +287,8 @@ def refresh_counts(conn, client: SnuClient, year: str, term: str, *,
         return {"term": term, "fetched": 0, "updated": 0,
                 "skipped": "no live metrics selected"}
 
-    fetched: list[dict] = []
-    page = 1
-    while True:
-        res = parse.parse_response(client.search_page(year, term, page=page))
-        fetched.extend(res["classes"])
-        total = res["total"]
-        if progress:
-            progress({"phase": "counts", "term": term, "label": label,
-                      "slot_index": len(fetched), "slot_total": total or len(fetched),
-                      "slot_label": "수강인원 갱신"})
-        if res["page_count"] == 0 or len(fetched) >= total:
-            break
-        page += 1
+    fetched = fetch_live_classes(client, year, term, label=label,
+                                 progress=progress)
 
     updated = 0
     for c in fetched:

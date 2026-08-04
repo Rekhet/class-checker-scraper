@@ -392,35 +392,15 @@ def _identity_text(value: str | None) -> str:
     ).casefold()
 
 
-def resolve_live_class(
-    conn: sqlite3.Connection,
-    year: str,
-    shtm_fg: str,
-    deta_shtm_fg: str,
-    sbjt_cd: str,
-    lt_no: str,
+def resolve_live_candidates(
+    candidates,
     subh_cd: str,
     *,
     name: str | None = None,
     professor: str | None = None,
     department: str | None = None,
 ) -> tuple[int | None, str]:
-    """Resolve a live search record to one catalog row.
-
-    The Excel catalog does not carry SNU's live ``subh_cd`` and currently writes
-    the placeholder ``000``. Prefer the complete live identity when it exists;
-    otherwise use the already-documented stable code/lecture identity, but only
-    when it identifies one catalog row. If that pair is duplicated, matching
-    non-empty name/professor/department fields may select one row; unresolved
-    ambiguity is deliberately rejected so counts cannot be written to the wrong
-    class.
-    """
-    scope = (year, shtm_fg, deta_shtm_fg, sbjt_cd, lt_no)
-    candidates = conn.execute(
-        "SELECT id, subh_cd, name, professor, department FROM classes "
-        "WHERE year=? AND shtm_fg=? AND deta_shtm_fg=? AND sbjt_cd=? AND lt_no=?",
-        scope,
-    ).fetchall()
+    """Resolve one live record against already-loaded catalog candidates."""
     for row in candidates:
         if row["subh_cd"] == subh_cd:
             return row["id"], "exact"
@@ -453,6 +433,40 @@ def resolve_live_class(
     if len(matches) == 1:
         return matches[0]["id"], "metadata"
     return None, "ambiguous"
+
+
+def resolve_live_class(
+    conn: sqlite3.Connection,
+    year: str,
+    shtm_fg: str,
+    deta_shtm_fg: str,
+    sbjt_cd: str,
+    lt_no: str,
+    subh_cd: str,
+    *,
+    name: str | None = None,
+    professor: str | None = None,
+    department: str | None = None,
+) -> tuple[int | None, str]:
+    """Resolve a live search record to one catalog row.
+
+    The Excel catalog does not carry SNU's live ``subh_cd`` and currently writes
+    the placeholder ``000``. Prefer the complete live identity when it exists;
+    otherwise use the already-documented stable code/lecture identity, but only
+    when it identifies one catalog row. If that pair is duplicated, matching
+    non-empty name/professor/department fields may select one row; unresolved
+    ambiguity is deliberately rejected so counts cannot be written to the wrong
+    class.
+    """
+    candidates = conn.execute(
+        "SELECT id, subh_cd, name, professor, department FROM classes "
+        "WHERE year=? AND shtm_fg=? AND deta_shtm_fg=? AND sbjt_cd=? AND lt_no=?",
+        (year, shtm_fg, deta_shtm_fg, sbjt_cd, lt_no),
+    ).fetchall()
+    return resolve_live_candidates(
+        candidates, subh_cd, name=name, professor=professor,
+        department=department,
+    )
 
 
 def update_counts(conn: sqlite3.Connection, year: str, shtm_fg: str,

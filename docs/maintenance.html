@@ -50,6 +50,24 @@ systemctl --user enable --now class-checker.update.timer
      hour. This keeps the trend cadence independent from remote publication
      cadence.</p>
 
+  <h2 id="cart-identity">Cart identity and NULL audit</h2>
+  <p>The Excel catalog uses <code>subh_cd=000</code> because that export does not
+     carry SNU's live sub-course code. The search page may return a different
+     <code>subh_cd</code>, so the counts overlay first tries the complete identity,
+     then falls back to the stable <code>(sbjt_cd, lt_no)</code> pair when it maps
+     to exactly one catalog row. If that pair is duplicated, matching course name,
+     professor, and department may disambiguate it; unresolved ambiguity is
+     skipped rather than writing a count to the wrong class.</p>
+  <pre><code><span class="cmt"># read-only storage + live-site audit</span>
+./scripts/audit-cart-counts --year 2026 --term fall --live
+
+<span class="cmt"># machine-readable report</span>
+./scripts/audit-cart-counts --year 2026 --term fall --live --json</code></pre>
+  <p>A stored <code>NULL</code> is expected outside the configured cart window.
+     With <code>--live</code>, the audit distinguishes site-side NULLs, safely
+     recoverable non-negative live values, ambiguous identities, and catalog rows
+     absent from the live roster.</p>
+
   <h2 id="safety">Worker safety and recovery</h2>
   <p>All database, export, and publication writers share the advisory
      <code>flock(2)</code> at <code>data/.crawl.lock</code>. The zero-length lock
