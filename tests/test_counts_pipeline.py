@@ -23,6 +23,37 @@ class CountsPipelineTests(unittest.TestCase):
         with patch.dict(os.environ, {"COLLECTION_TIMEZONE": "Asia/Seoul"}, clear=False):
             self.assertEqual(crawl._today_iso(instant), "2026-08-05")
 
+    def test_refresh_counts_reaches_reported_total_past_page_200(self) -> None:
+        total = 202
+        pages = []
+
+        def search_page(_self, _year, _term, *, page, **_kwargs):
+            pages.append(page)
+            return str(page)
+
+        def parse_page(html):
+            page = int(html)
+            return {
+                "total": total,
+                "page_count": 1,
+                "classes": [{
+                    "shtm_fg": "fall", "deta_shtm_fg": "", "sbjt_cd": f"C{page:03}",
+                    "lt_no": "001", "subh_cd": "000", "cart": page,
+                }],
+            }
+
+        conn = type("Connection", (), {"commit": lambda _self: None})()
+        client = type("Client", (), {"search_page": search_page})()
+        with patch.object(crawl.parse, "parse_response", side_effect=parse_page), \
+             patch.object(crawl.db, "update_counts", return_value=True):
+            result = crawl.refresh_counts(
+                conn, client, "2026", "fall",
+                collect_cart=True, collect_enrollment=False,
+            )
+
+        self.assertEqual(result["fetched"], total)
+        self.assertEqual(pages, list(range(1, total + 1)))
+
     def _connection_with_class(self, path: Path):
         conn = db._connect_sqlite(path)
         db.init_schema(conn)

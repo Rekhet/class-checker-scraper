@@ -270,7 +270,7 @@ def refresh_counts(conn, client: SnuClient, year: str, term: str, *,
             progress({"phase": "counts", "term": term, "label": label,
                       "slot_index": len(fetched), "slot_total": total or len(fetched),
                       "slot_label": "수강인원 갱신"})
-        if res["page_count"] == 0 or len(fetched) >= total or page > 200:
+        if res["page_count"] == 0 or len(fetched) >= total:
             break
         page += 1
 
