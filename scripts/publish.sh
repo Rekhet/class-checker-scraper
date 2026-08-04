@@ -40,6 +40,7 @@ case "$MODE" in
   full)
     "$PY" scraper/export_json.py
     MESSAGE="${PUBLISH_COMMIT_MESSAGE:-chore(data): update}"
+    PUSH_ALLOWED=1
     ;;
   counts|trend)
     PUBLISH_YEAR="${YEAR:-${COUNT_YEAR:-}}"
@@ -54,6 +55,9 @@ case "$MODE" in
     # file lives. The class catalog itself is intentionally not rewritten by a
     # 10-minute count pass.
     MESSAGE="${PUBLISH_COMMIT_MESSAGE:-chore(data): update trend}"
+    # Frequent trend commits are deliberately kept local. The hourly full
+    # update is the only scheduled path allowed to push the accumulated queue.
+    PUSH_ALLOWED=0
     ;;
   *)
     echo "error: unknown publish mode '$MODE' (expected full or counts)" >&2
@@ -78,6 +82,8 @@ if git -C "$WEB_ROOT" diff --cached --quiet; then
 fi
 
 git -C "$WEB_ROOT" commit -m "$MESSAGE"
-if [ "${PUBLISH_PUSH:-1}" != "0" ]; then
+if [ "$PUSH_ALLOWED" = "0" ]; then
+  echo "trend commit retained locally; the hourly full update will push it"
+elif [ "${PUBLISH_PUSH:-1}" != "0" ]; then
   git -C "$WEB_ROOT" push
 fi

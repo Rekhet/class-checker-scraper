@@ -5,6 +5,13 @@ host-local `data/.crawl.lock`. The lock is held across the database operation,
 JSON export, and Git publication, so a counts pass cannot read a half-rebuilt
 term or publish over another update.
 
+The bounded cart/trend service commits each generated trend update in the
+`web/` repository but deliberately does not push it. The hourly
+`class-checker.update.timer` runs the full update and is the scheduled push
+boundary, so it publishes the accumulated local commits once per hour. A
+manual `scripts/publish.sh counts` or `trend` invocation follows the same
+commit-only policy; full publication retains the `PUBLISH_PUSH=0` escape hatch.
+
 Install or refresh the user units with:
 
 ```sh

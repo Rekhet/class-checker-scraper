@@ -59,5 +59,6 @@ fi
 "$ROOT/refresh.sh" --year "$COUNT_YEAR" --collect "$COLLECTIONS" --windowed \
   "$COUNT_SEM"
 
-YEAR="$COUNT_YEAR" SEM="$COUNT_SEM" PUBLISH_COMMIT_MESSAGE="${PUBLISH_COMMIT_MESSAGE:-chore(data): update trend}" \
+YEAR="$COUNT_YEAR" SEM="$COUNT_SEM" PUBLISH_PUSH=0 \
+  PUBLISH_COMMIT_MESSAGE="${PUBLISH_COMMIT_MESSAGE:-chore(data): update trend}" \
   "$ROOT/scripts/publish.sh" counts

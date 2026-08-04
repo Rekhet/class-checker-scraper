@@ -24,7 +24,7 @@
         <td>Heavy — one Excel/term, plus a 168-cell sweep for not-yet-published terms</td>
         <td>Daily, or whenever a timetable changes</td></tr>
     <tr><td><strong>Counts-only</strong> overlay</td>
-        <td>Light — one paginated roster/term</td>
+        <td>Light — one paginated roster/term; commits locally per run</td>
         <td>Often during registration (e.g. every few minutes)</td></tr>
   </table></div>
   <pre><code><span class="cmt"># existing full update timer (cart excluded)</span>
@@ -43,6 +43,12 @@ systemctl --user enable --now class-checker.update.timer
        collector. Both use the same host-local <code>data/.crawl.lock</code>, including
        JSON export and Git publication. The old broad
        <code>class-checker.update-counts.timer</code> should remain disabled.</p></div>
+  <p>Frequent bounded trend runs commit their generated JSON in the public
+     <code>web/</code> repository but do not push each commit. The hourly
+     <code>class-checker.update.timer</code> performs the full update and is the
+     scheduled push boundary, publishing the accumulated local commits once per
+     hour. This keeps the trend cadence independent from remote publication
+     cadence.</p>
 
   <h2 id="safety">Worker safety and recovery</h2>
   <p>All database, export, and publication writers share the advisory

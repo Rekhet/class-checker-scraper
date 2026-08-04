@@ -293,6 +293,11 @@ date-bounded cart worker:
   lock timeout; cleanup waits up to 1800 seconds. Cart timers do not replay
   missed events, while persistent full/cleanup timers may catch up. Separate
   services serialize through the lock rather than creating a durable queue.
+- Frequent cart/trend workers export and commit their data in `web/` without
+  pushing. The hourly `class-checker.update.timer` full update is the only
+  scheduled push boundary, publishing the accumulated local commits once per
+  hour. Counts/trend publication enforces commit-only behavior even if
+  `PUBLISH_PUSH=1` is inherited.
 
 The following are deliberately deferred, not silently considered solved:
 
