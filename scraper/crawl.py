@@ -282,11 +282,20 @@ def refresh_counts(conn, client: SnuClient, year: str, term: str, *,
         if collect_enrollment:
             kwargs.update(applied=c.get("applied"), quota=c.get("quota"),
                           enrolled=c.get("enrolled"))
-        if db.update_counts(conn, year, c["shtm_fg"], c["deta_shtm_fg"],
-                            c["sbjt_cd"], c["lt_no"], c["subh_cd"], **kwargs):
+        if db.update_counts(
+            conn, year, c["shtm_fg"], c["deta_shtm_fg"], c["sbjt_cd"],
+            c["lt_no"], c["subh_cd"], name=c.get("name"),
+            professor=c.get("professor"), department=c.get("department"),
+            **kwargs,
+        ):
             updated += 1
     conn.commit()
-    return {"term": term, "fetched": len(fetched), "updated": updated}
+    unmatched = len(fetched) - updated
+    if unmatched:
+        log.warning("live count overlay left %d/%d classes unmatched for %s",
+                    unmatched, len(fetched), term)
+    return {"term": term, "fetched": len(fetched), "updated": updated,
+            "unmatched": unmatched}
 
 
 # 성적부여형태 (MRKS_GV_MTHD) codes from cc100ajax STRINGCOMMONCODE. A~F + S/U +

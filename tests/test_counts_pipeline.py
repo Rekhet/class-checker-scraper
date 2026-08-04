@@ -54,6 +54,109 @@ class CountsPipelineTests(unittest.TestCase):
         self.assertEqual(result["fetched"], total)
         self.assertEqual(pages, list(range(1, total + 1)))
 
+    def test_live_counts_match_unique_catalog_class_when_subh_differs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._connection_with_class(Path(tmp) / "test.db") as conn:
+                response = {
+                    "total": 1,
+                    "page_count": 0,
+                    "classes": [{
+                        "shtm_fg": "fall", "deta_shtm_fg": "",
+                        "sbjt_cd": "C101", "lt_no": "001", "subh_cd": "007",
+                        "name": "테스트", "cart": 21,
+                    }],
+                }
+
+                with patch.object(crawl.parse, "parse_response", return_value=response):
+                    result = crawl.refresh_counts(
+                        conn,
+                        type("Client", (), {"search_page": lambda *_args, **_kwargs: ""})(),
+                        "2026",
+                        "fall",
+                        collect_cart=True,
+                        collect_enrollment=False,
+                    )
+
+                row = conn.execute("SELECT cart FROM classes").fetchone()
+                self.assertEqual(result["updated"], 1)
+                self.assertEqual(row[0], 21)
+
+    def test_live_counts_use_metadata_when_code_and_lecture_are_ambiguous(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._connection_with_class(Path(tmp) / "test.db") as conn:
+                conn.execute(
+                    """INSERT INTO classes
+                       (term, year, shtm_fg, deta_shtm_fg, sbjt_cd, lt_no,
+                        subh_cd, name, quota, cart)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    ("fall", "2026", "fall", "", "C101", "001", "001",
+                     "다른 과목", 30, 8),
+                )
+                conn.commit()
+                response = {
+                    "total": 1,
+                    "page_count": 0,
+                    "classes": [{
+                        "shtm_fg": "fall", "deta_shtm_fg": "",
+                        "sbjt_cd": "C101", "lt_no": "001", "subh_cd": "007",
+                        "name": "테스트", "cart": 21,
+                    }],
+                }
+
+                with patch.object(crawl.parse, "parse_response", return_value=response):
+                    result = crawl.refresh_counts(
+                        conn,
+                        type("Client", (), {"search_page": lambda *_args, **_kwargs: ""})(),
+                        "2026",
+                        "fall",
+                        collect_cart=True,
+                        collect_enrollment=False,
+                    )
+
+                rows = conn.execute(
+                    "SELECT subh_cd, cart FROM classes ORDER BY subh_cd"
+                ).fetchall()
+                self.assertEqual(result["updated"], 1)
+                self.assertEqual([(r[0], r[1]) for r in rows], [("000", 21), ("001", 8)])
+
+    def test_live_counts_skip_ambiguous_identity_without_metadata_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._connection_with_class(Path(tmp) / "test.db") as conn:
+                conn.execute(
+                    """INSERT INTO classes
+                       (term, year, shtm_fg, deta_shtm_fg, sbjt_cd, lt_no,
+                        subh_cd, name, quota, cart)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    ("fall", "2026", "fall", "", "C101", "001", "001",
+                     "다른 과목", 30, 8),
+                )
+                conn.commit()
+                response = {
+                    "total": 1,
+                    "page_count": 0,
+                    "classes": [{
+                        "shtm_fg": "fall", "deta_shtm_fg": "",
+                        "sbjt_cd": "C101", "lt_no": "001", "subh_cd": "007",
+                        "name": "확인 불가", "cart": 21,
+                    }],
+                }
+
+                with patch.object(crawl.parse, "parse_response", return_value=response):
+                    result = crawl.refresh_counts(
+                        conn,
+                        type("Client", (), {"search_page": lambda *_args, **_kwargs: ""})(),
+                        "2026",
+                        "fall",
+                        collect_cart=True,
+                        collect_enrollment=False,
+                    )
+
+                rows = conn.execute(
+                    "SELECT subh_cd, cart FROM classes ORDER BY subh_cd"
+                ).fetchall()
+                self.assertEqual(result["updated"], 0)
+                self.assertEqual([(r[0], r[1]) for r in rows], [("000", 7), ("001", 8)])
+
     def _connection_with_class(self, path: Path):
         conn = db._connect_sqlite(path)
         db.init_schema(conn)

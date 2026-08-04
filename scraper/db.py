@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import unicodedata
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "classes.db"
@@ -384,21 +385,100 @@ def add_slot(conn: sqlite3.Connection, class_id: int, slot: dict) -> bool:
     return cur.rowcount > 0
 
 
+def _identity_text(value: str | None) -> str:
+    """Normalize catalog/live text used only to disambiguate one code/lecture."""
+    return " ".join(
+        unicodedata.normalize("NFKC", str(value or "")).split()
+    ).casefold()
+
+
+def resolve_live_class(
+    conn: sqlite3.Connection,
+    year: str,
+    shtm_fg: str,
+    deta_shtm_fg: str,
+    sbjt_cd: str,
+    lt_no: str,
+    subh_cd: str,
+    *,
+    name: str | None = None,
+    professor: str | None = None,
+    department: str | None = None,
+) -> tuple[int | None, str]:
+    """Resolve a live search record to one catalog row.
+
+    The Excel catalog does not carry SNU's live ``subh_cd`` and currently writes
+    the placeholder ``000``. Prefer the complete live identity when it exists;
+    otherwise use the already-documented stable code/lecture identity, but only
+    when it identifies one catalog row. If that pair is duplicated, matching
+    non-empty name/professor/department fields may select one row; unresolved
+    ambiguity is deliberately rejected so counts cannot be written to the wrong
+    class.
+    """
+    scope = (year, shtm_fg, deta_shtm_fg, sbjt_cd, lt_no)
+    candidates = conn.execute(
+        "SELECT id, subh_cd, name, professor, department FROM classes "
+        "WHERE year=? AND shtm_fg=? AND deta_shtm_fg=? AND sbjt_cd=? AND lt_no=?",
+        scope,
+    ).fetchall()
+    for row in candidates:
+        if row["subh_cd"] == subh_cd:
+            return row["id"], "exact"
+
+    if not candidates:
+        return None, "missing"
+    if len(candidates) == 1:
+        return candidates[0]["id"], "code+lecture"
+
+    live_fields = {
+        "name": _identity_text(name),
+        "professor": _identity_text(professor),
+        "department": _identity_text(department),
+    }
+
+    def metadata_matches(row) -> bool:
+        compared = 0
+        for field, expected in live_fields.items():
+            actual = _identity_text(row[field])
+            # A missing catalog field is not evidence against a candidate, but
+            # at least one populated comparable field must agree.
+            if not expected or not actual:
+                continue
+            compared += 1
+            if expected != actual:
+                return False
+        return compared > 0
+
+    matches = [row for row in candidates if metadata_matches(row)]
+    if len(matches) == 1:
+        return matches[0]["id"], "metadata"
+    return None, "ambiguous"
+
+
 def update_counts(conn: sqlite3.Connection, year: str, shtm_fg: str,
                   deta_shtm_fg: str, sbjt_cd: str, lt_no: str, subh_cd: str, *,
-                  applied: int | None = None, quota: int | None = None,
-                  enrolled: int | None = None, cart: int | None = None) -> bool:
-    """Overlay live enrollment numbers from the search endpoint onto an existing
-    Excel-built row. Only the volatile columns move; a None leaves the old value
-    (COALESCE), a real value (incl. 0) overrides the stale Excel count."""
+                  name: str | None = None, professor: str | None = None,
+                  department: str | None = None, applied: int | None = None,
+                  quota: int | None = None, enrolled: int | None = None,
+                  cart: int | None = None) -> bool:
+    """Overlay live enrollment numbers onto the resolved catalog row.
+
+    Only volatile columns move; a None leaves the old value (COALESCE), and a
+    real value (including 0) overrides the stale Excel count. Resolution first
+    uses the full live identity, then a safe stable-code fallback for catalogs
+    whose Excel row has a placeholder ``subh_cd``.
+    """
+    class_id, _method = resolve_live_class(
+        conn, year, shtm_fg, deta_shtm_fg, sbjt_cd, lt_no, subh_cd,
+        name=name, professor=professor, department=department,
+    )
+    if class_id is None:
+        return False
     cur = conn.execute(
         "UPDATE classes SET applied=COALESCE(?, applied), "
         "quota=COALESCE(?, quota), enrolled=COALESCE(?, enrolled), "
-        "cart=COALESCE(?, cart) "
-        "WHERE year=? AND shtm_fg=? AND deta_shtm_fg=? AND sbjt_cd=? "
-        "AND lt_no=? AND subh_cd=?",
-        (applied, quota, enrolled, cart, year, shtm_fg, deta_shtm_fg,
-         sbjt_cd, lt_no, subh_cd),
+        "cart=COALESCE(?, cart) WHERE id=?",
+        (applied, quota, enrolled, cart, class_id),
     )
     return cur.rowcount > 0
 
