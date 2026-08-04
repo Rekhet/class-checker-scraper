@@ -155,6 +155,11 @@ def _parse_item(item, slot: TimeSlot, year, shtm, deta) -> ClassRecord:
                 rec.cart = _int_or_none(val)
             elif "학점" in t:
                 rec.credits = _int_or_none(val)
+    # The live search page renders the cart count outside the course-info list.
+    # It is the text node after <em title="장바구니"></em> in this span.
+    cart = item.select_one("span.carts")
+    if cart:
+        rec.cart = _int_or_none(cart.get_text(" ", strip=True))
     rec.time_blocks = slots.parse_blocks(item.get_text(" "))
     return rec
 
