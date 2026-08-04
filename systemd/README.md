@@ -27,6 +27,12 @@ systemctl --user daemon-reload
 systemctl --user enable --now class-checker.update.timer
 ```
 
+Each worker service creates the private user-runtime directory
+`%t/class-checker` and exports it as `TMPDIR`. Playwright therefore keeps its
+temporary Chromium profiles out of the shared `/tmp` filesystem, where
+unrelated stale files or quota pressure can otherwise make a browser launch
+fail. systemd removes the runtime directory when the oneshot service exits.
+
 The legacy counts timer is deliberately broad on weekdays during 09:00–20:50,
 but it must remain disabled when a bounded cart window is installed. The
 `--windowed` pass checks `collect.env` before opening a SNU session, so the

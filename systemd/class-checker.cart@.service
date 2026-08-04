@@ -7,5 +7,10 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory=%h/project/class-checker
 EnvironmentFile=%h/.config/systemd/user/class-checker.cart-window-%i.env
+# Keep Playwright's temporary Chromium profiles in the user runtime filesystem,
+# rather than the shared /tmp filesystem that can fill independently.
+RuntimeDirectory=class-checker
+RuntimeDirectoryMode=0700
+Environment=TMPDIR=%t/class-checker
 ExecStart=%h/project/class-checker/scripts/update-counts.sh
 TimeoutStartSec=20min

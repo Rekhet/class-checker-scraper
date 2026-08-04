@@ -8,5 +8,8 @@ WorkingDirectory=%h/project/class-checker
 # the entry point. COUNT_MODE=cart maps to --collect cart; COUNT_MODE=counts
 # maps to --collect cart,enrollment. This unit contains no semester-specific values.
 Environment=CRAWL_LOCK_TIMEOUT=900
+RuntimeDirectory=class-checker
+RuntimeDirectoryMode=0700
+Environment=TMPDIR=%t/class-checker
 ExecStart=%h/project/class-checker/scripts/update-counts.sh
 TimeoutStartSec=20min

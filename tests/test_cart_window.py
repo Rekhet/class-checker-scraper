@@ -111,6 +111,16 @@ class CartWindowScheduleTests(unittest.TestCase):
         self.assertIn("COLLECTION_TIMEZONE=Asia/Seoul", environment)
         self.assertIn("CART_WINDOWS=2026-08-04..2026-08-05", environment)
 
+    def test_worker_units_use_private_runtime_directory_for_browser_temp_files(self) -> None:
+        for name in (
+            "class-checker.cart@.service",
+            "class-checker.update-counts.service",
+            "class-checker.update.service",
+        ):
+            unit = (ROOT / "systemd" / name).read_text(encoding="utf-8")
+            self.assertIn("RuntimeDirectory=class-checker", unit, name)
+            self.assertIn("Environment=TMPDIR=%t/class-checker", unit, name)
+
     def test_launcher_is_idempotent_for_one_window_and_rejects_another(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             unit_dir = Path(tmp) / "user"
