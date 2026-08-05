@@ -121,6 +121,12 @@ systemctl --user enable --now class-checker.update.timer
      writing):</p>
   <pre><code>cp data/classes.db  backups/classes-$(date +%F).db   <span class="cmt"># SQLite</span>
 cp data/turso.db    backups/turso-$(date +%F).db     <span class="cmt"># local libSQL</span></code></pre>
+  <p>Recovery artifacts are kept under <code>backups/</code> in the private
+     automation repository. The June cleanup archive
+     <code>backups/class-checker-june-samples-20260804.jsonl.gz</code> contains
+     177,120 historical samples from 2026-06-21 through 2026-06-23. It is not
+     imported by scheduled workers; restore it only as an explicit recovery
+     operation.</p>
   <p>A rebuild is always reproducible from SNU, so backups are convenience, not
      safety. <code>crawl_runs</code> retains the history of every refresh.</p>
 

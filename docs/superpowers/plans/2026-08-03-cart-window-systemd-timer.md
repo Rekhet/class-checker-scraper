@@ -17,7 +17,8 @@ trend samples.
 
 Plan date: 2026-08-04; last operational audit: 2026-08-05
 
-Related audit note: `/tmp/class-checker-blockers.md`
+Related audit note:
+`docs/superpowers/audits/2026-08-03-class-checker-blockers.md`
 
 ## Blocker-remediation progress
 
@@ -328,6 +329,6 @@ The following are deliberately deferred, not silently considered solved:
    the `Result=success` and actual-execution gate is implemented.
 
 The final 16:00 cart-worker journal and 16:10 cleanup journal still need to be
-checked after the real August 4–5 window. The temporary blocker note remains
-the detailed working record and is intentionally not revised by this update;
-this section is the permanent summary of the decision and audit state.
+checked after the real August 4–5 window. The blocker audit note remains the
+detailed historical working record and is intentionally not revised by this
+update; this section is the permanent summary of the decision and audit state.

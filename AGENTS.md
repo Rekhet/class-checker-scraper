@@ -20,8 +20,9 @@ explicitly. Do not describe a pending check as complete. Read-only audits do
 not require documentation changes, but any completed mutation or operational
 fix does.
 
-The temporary `/tmp/class-checker-blockers.md` note is historical working
-material and must remain unchanged unless the user explicitly requests an
-update. The `web/` directory is a separate public deployment repository and
-must not be changed for private automation or documentation work unless the
-user explicitly includes it in scope.
+The historical blocker audit at
+`docs/superpowers/audits/2026-08-03-class-checker-blockers.md` must remain
+unchanged unless the user explicitly requests an update. The `web/` directory
+is a separate public deployment repository and must not be changed for private
+automation or documentation work unless the user explicitly includes it in
+scope.
