@@ -49,6 +49,13 @@ systemctl --user enable --now class-checker.update.timer
      scheduled push boundary, publishing the accumulated local commits once per
      hour. This keeps the trend cadence independent from remote publication
      cadence.</p>
+  <p>The worker service templates create the private user-runtime directory
+     <code>%t/class-checker</code> and export it as <code>TMPDIR</code>, keeping
+     Playwright's temporary Chromium profiles out of the shared
+     <code>/tmp</code> filesystem. During the 2026-08-05 audit, two runs failed
+     because that shared filesystem rejected Chromium profile writes. After the
+     templates were refreshed, the 01:00 run completed successfully for all
+     8,625 classes and produced 96 trend samples.</p>
 
   <h2 id="cart-identity">Cart identity and NULL audit</h2>
   <p>The Excel catalog uses <code>subh_cd=000</code> because that export does not
@@ -138,6 +145,8 @@ curl -s http://127.0.0.1:8011/api/status | python3 -m json.tool</code></pre>
         <td>Run <code>playwright install chromium</code>. Minting visits the sugang home to collect <code>JSESSIONID</code> + <code>enter=Y</code>, then validates with a test POST.</td></tr>
     <tr><td><code>database is locked</code></td>
         <td>A crawl and the server are writing/holding the same local file. Stop the server during heavy rebuilds, or serve from a replica.</td></tr>
+    <tr><td>Playwright reports <code>TargetClosedError</code> or Chromium cannot create its cache/profile</td>
+        <td>Refresh the installed worker units from <code>systemd/</code> and run <code>systemctl --user daemon-reload</code>. The units must set <code>TMPDIR=%t/class-checker</code>; do not rely on the shared <code>/tmp</code> filesystem.</td></tr>
     <tr><td>Refresh returns <code>401</code></td>
         <td><code>ADMIN_TOKEN</code> is set — send it as the <code>X-Admin-Token</code> header.</td></tr>
     <tr><td>Saved timetable shows old times</td>

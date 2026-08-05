@@ -8,7 +8,14 @@ and operational documentation are complete in the root automation repository.
 The August 4–5, 2026 window is installed; its final collector and scheduled
 cleanup journal entries remain live verification items until those events occur.
 
-Date: 2026-08-04
+The 2026-08-05 pre-final-window audit found two Chromium startup failures caused
+by temporary profile I/O under the shared `/tmp` filesystem. All worker service
+templates now allocate `%t/class-checker` and export it as `TMPDIR`; the
+installed user units were refreshed and reloaded. The mitigation was verified by
+the 01:00 collector run, which completed 8,625/8,625 classes and exported 96
+trend samples.
+
+Plan date: 2026-08-04; last operational audit: 2026-08-05
 
 Related audit note: `/tmp/class-checker-blockers.md`
 
@@ -40,6 +47,9 @@ As of 2026-08-04:
 - [x] Cleanup requires an inactive collector with `Result=success` and a real
       `ExecMainStartTimestamp` before removing generated window state; failed,
       unavailable, or never-run collectors leave that state in place.
+- [x] Worker service templates isolate Playwright's temporary browser profiles
+      in the user runtime filesystem instead of shared `/tmp`; the installed
+      units were refreshed and the post-fix collector run succeeded.
 
 The root automation repository was initialized with commit `97bca30`. The
 public `web/` repository remains separate and is intentionally ignored by the
@@ -298,6 +308,11 @@ date-bounded cart worker:
   scheduled push boundary, publishing the accumulated local commits once per
   hour. Counts/trend publication enforces commit-only behavior even if
   `PUBLISH_PUSH=1` is inherited.
+- The 00:30 and 00:40 bounded runs failed with Chromium profile I/O errors;
+  the 00:50 run recovered before the service-template mitigation. After
+  installing commit `a59e116`, the 01:00 run completed with systemd
+  `Result=success`, processed all 8,625 classes, exported 96 samples, and
+  retained web commit `bcdfd02` locally for the hourly push boundary.
 
 The following are deliberately deferred, not silently considered solved:
 
@@ -312,7 +327,7 @@ The following are deliberately deferred, not silently considered solved:
 7. Automatic retry or durable recovery of a failed or never-run final sample;
    the `Result=success` and actual-execution gate is implemented.
 
-The final cart-worker journal and 16:10 cleanup journal still need to be
+The final 16:00 cart-worker journal and 16:10 cleanup journal still need to be
 checked after the real August 4–5 window. The temporary blocker note remains
-the detailed working record; this section is the permanent summary of the
-decision and audit state.
+the detailed working record and is intentionally not revised by this update;
+this section is the permanent summary of the decision and audit state.
