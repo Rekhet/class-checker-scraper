@@ -37,11 +37,21 @@ systemctl --user enable --now class-checker.update.timer
   --semester fall \
   --timezone Asia/Seoul \
   --disable-broad-timer</code></pre>
+  <pre><code><span class="cmt"># bounded multi-date enrollment window</span>
+./scripts/start-enrollment-window \
+  --dates 2026-08-07,2026-08-10,2026-08-11 \
+  --start-time 08:30 \
+  --end-time 16:30 \
+  --year 2026 \
+  --semester fall \
+  --timezone Asia/Seoul \
+  --disable-broad-timer</code></pre>
   <div class="callout note"><span class="ic">⏱️</span>
     <p>The scheduled full update collects the catalog, enrollment, and grading
-       components, but not cart. The bounded worker is the only scheduled cart
-       collector. Both use the same host-local <code>data/.crawl.lock</code>, including
-       JSON export and Git publication. The old broad
+       components, but not cart. The bounded cart worker collects cart during its
+       own window, and the bounded enrollment worker collects live applied/enrolled
+       counts on the listed registration days. Both use the same host-local
+       <code>data/.crawl.lock</code>, including JSON export and Git publication. The old broad
        <code>class-checker.update-counts.timer</code> should remain disabled.</p></div>
   <p>Frequent bounded trend runs commit their generated JSON in the public
      <code>web/</code> repository but do not push each commit. The hourly
@@ -91,8 +101,8 @@ systemctl --user enable --now class-checker.update.timer
             activations are not replayed; persistent full/cleanup timers may
             receive a catch-up activation.</td></tr>
     <tr><td>Overlapping requests</td>
-        <td>The same oneshot service does not run in parallel. Separate full,
-            cart, and cleanup services serialize through the shared lock; a
+            <td>The same oneshot service does not run in parallel. Separate full,
+            cart, enrollment, and cleanup services serialize through the shared lock; a
             waiter exits <code>75</code> after the lock timeout rather than
             creating a durable queue.</td></tr>
     <tr><td>Long collector or cleanup</td>
@@ -107,6 +117,22 @@ systemctl --user enable --now class-checker.update.timer
      staging isolation, and direct-wrapper process-group hardening remain
      deferred. The full rationale is in the
      <a href="superpowers/plans/2026-08-03-cart-window-systemd-timer.md#post-implementation-audit-2026-08-04">implementation audit</a>.</p>
+
+  <h2 id="json-boundaries">Frontend JSON boundaries</h2>
+  <p>The public static page validates the shape and data types of its catalog,
+     trend, explorer, graduation, import, local-storage, and optional status
+     payloads before using them. A malformed term is skipped locally; malformed
+     trend, explorer, or graduation data disables only that feature. Trend
+     metrics must be integers or <code>null</code>, and all metric arrays must
+     align with their timestamp array. The trend tooltip uses DOM text nodes,
+     so values from the published JSON are not parsed as HTML.</p>
+  <p>This validation deliberately does not cap payload size or array length.
+     It protects structure and types while allowing legitimate future growth.
+     The browser regression suite can be run with:</p>
+  <pre><code>TEST_TMPDIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/class-checker-json-validation"
+mkdir -p "$TEST_TMPDIR"
+TMPDIR="$TEST_TMPDIR" python3 -m unittest \
+  web.tests.test_json_validation web.tests.test_search_cart</code></pre>
 
   <h2 id="fall">Fall timing recovery</h2>
   <p>Before SNU publishes a term's timetable into the Excel, its 수업교시 column is

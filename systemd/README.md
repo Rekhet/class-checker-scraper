@@ -1,11 +1,11 @@
 # User timers
 
-The full update service and the fast cart/trend service both use the same
+The full update service and the fast cart/enrollment/trend services all use the same
 host-local `data/.crawl.lock`. The lock is held across the database operation,
 JSON export, and Git publication, so a counts pass cannot read a half-rebuilt
 term or publish over another update.
 
-The bounded cart/trend service commits each generated trend update in the
+The bounded cart/enrollment/trend services commit each generated trend update in the
 `web/` repository but deliberately does not push it. The hourly
 `class-checker.update.timer` runs the full update and is the scheduled push
 boundary, so it publishes the accumulated local commits once per hour. A
@@ -34,7 +34,7 @@ unrelated stale files or quota pressure can otherwise make a browser launch
 fail. systemd removes the runtime directory when the oneshot service exits.
 
 The legacy counts timer is deliberately broad on weekdays during 09:00–20:50,
-but it must remain disabled when a bounded cart window is installed. The
+but it must remain disabled when a bounded cart or enrollment window is installed. The
 `--windowed` pass checks `collect.env` before opening a SNU session, so the
 legacy worker is inactive outside the configured cart/enrollment windows.
 Change `COUNT_MODE` to `counts` in `collect.env` when an intentional manual or
@@ -50,7 +50,8 @@ grading     평가방식/전환가능여부 sweep
 ```
 
 The scheduled full update uses `catalog,enrollment,grading`; it deliberately
-excludes `cart`. The bounded worker uses `cart`. When both live groups are
+excludes `cart`. A bounded cart worker uses `cart`, while a bounded enrollment
+worker uses `enrollment`. When both live groups are
 selected, they share one search pass and do not issue duplicate count requests.
 `COUNT_YEAR`, `COUNT_SEM`, `COUNT_MODE`, `COLLECTION_TIMEZONE`, and the
 `*_WINDOWS` values in `collect.env` remain the canonical runtime configuration;
@@ -83,11 +84,41 @@ stops future collector activations, waits for the collector and
 timer files. The reusable `@.service` templates remain installed.
 
 The old broad `class-checker.update-counts.timer` is intentionally not allowed
-to run alongside a bounded window, because it would duplicate cart requests.
+to run alongside a bounded window, because it would duplicate live-count
+requests.
 The launcher rejects that state unless `--disable-broad-timer` is supplied. It
 also rejects a second overlapping bounded window and is safe to rerun for the
 same start date. Use `--dry-run` to inspect a schedule without changing files
 or systemd.
+
+## Bounded multi-date enrollment collection
+
+Use the enrollment launcher for first-come registration days. It renders one
+date-specific user timer containing only the requested dates, plus one cleanup
+timer after the final date:
+
+```sh
+./scripts/start-enrollment-window \
+  --dates 2026-08-07,2026-08-10,2026-08-11 \
+  --start-time 08:30 \
+  --end-time 16:30 \
+  --year 2026 \
+  --semester fall \
+  --timezone Asia/Seoul \
+  --disable-broad-timer
+```
+
+The 2026-2 portal schedule lists 08:30–16:30 for all three dates. The timer
+therefore creates 49 runs per date, 147 total, and does not run on the weekend
+or on 8/12. Its environment selects `COUNT_MODE=enrollment`, so samples record
+the live applied/enrolled group and leave cart sampling disabled. Cleanup runs
+at 16:40 on 8/11, waits for the final service and shared lock, and removes only
+the generated enrollment-window files after the same success gate used by the
+cart cleanup.
+
+Use `--dry-run` to inspect the exact schedule without writing units or starting
+systemd. The launcher rejects duplicate or unsorted dates and a second
+different enrollment window, and it is safe to rerun the same window.
 
 ## Lock, sleep, and overlap behavior
 
@@ -101,8 +132,8 @@ expected to terminate the wrapper and its child together.
 When the computer sleeps, a suspended lock owner normally keeps its descriptor
 and lock. A waiting worker can therefore remain blocked until the
 `CRAWL_LOCK_TIMEOUT` default of 900 seconds, then exits with status 75. The
-generated cart timer uses `Persistent=false`, so missed cart activations are
-not replayed after wake. The full-update and cleanup timers are persistent and
+generated cart and enrollment timers use `Persistent=false`, so missed bounded
+activations are not replayed after wake. The full-update and cleanup timers are persistent and
 may receive a catch-up activation. Cleanup waits up to 1800 seconds for an
 active collector or the shared lock; if that wait expires, it leaves the
 window state for manual recovery. Before deleting the generated window files,
@@ -111,13 +142,13 @@ non-empty `ExecMainStartTimestamp`; a failed, unavailable, or never-run
 collector leaves the state in place and returns failure.
 
 An activation request for a service that is already running is not executed in
-parallel. The full, cart, and cleanup services are distinct, so they can be
+parallel. The full, cart, enrollment, and cleanup services are distinct, so they can be
 requested independently, but the shared lock serializes their database,
 export, and publication work. A later worker waits and then exits 75 if the
 first worker does not release the lock in time; the current design does not
 queue an automatic retry.
 
-The cart service has a 20-minute `TimeoutStartSec`; cleanup has 35 minutes.
+The cart and enrollment services have a 20-minute `TimeoutStartSec`; cleanup has 35 minutes.
 Systemd termination releases the lock, but interrupted work may be partial and
 is not automatically retried. Directly signalling only a wrapper outside
 systemd could leave an orphaned child; explicit process-group hardening is

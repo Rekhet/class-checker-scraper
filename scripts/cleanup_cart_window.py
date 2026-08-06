@@ -14,8 +14,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scraper"))
 import process_lock  # noqa: E402
 
 
-WINDOW_ID_PATTERN = re.compile(r"^[0-9]{8}$")
+WINDOW_ID_PATTERNS = {
+    "cart": re.compile(r"^[0-9]{8}$"),
+    "enrollment": re.compile(r"^[0-9]{8}(?:-[0-9]{8})+$"),
+}
 UNIT_NOT_FOUND = 5
+
+
+def _window_prefixes(kind: str) -> tuple[str, str, str]:
+    if kind == "cart":
+        return (
+            "class-checker.cart@",
+            "class-checker.cart-cleanup@",
+            "class-checker.cart-window-",
+        )
+    if kind == "enrollment":
+        return (
+            "class-checker.enrollment@",
+            "class-checker.enrollment-cleanup@",
+            "class-checker.enrollment-window-",
+        )
+    raise ValueError(f"unsupported bounded window kind: {kind!r}")
 
 
 def default_unit_dir() -> Path:
@@ -114,29 +133,35 @@ def wait_for_lock(
             time.sleep(min(max(0.01, poll_interval), max(0.01, deadline - time.monotonic())))
 
 
-def _window_paths(unit_dir: Path, identifier: str) -> tuple[Path, Path, Path]:
-    if not WINDOW_ID_PATTERN.fullmatch(identifier):
+def _window_paths(
+    unit_dir: Path, identifier: str, kind: str = "cart"
+) -> tuple[Path, Path, Path]:
+    pattern = WINDOW_ID_PATTERNS.get(kind)
+    if pattern is None or not pattern.fullmatch(identifier):
         raise ValueError(f"unsafe window id: {identifier!r}")
+    collector_prefix, cleanup_prefix, environment_prefix = _window_prefixes(kind)
     return (
-        unit_dir / f"class-checker.cart@{identifier}.timer",
-        unit_dir / f"class-checker.cart-cleanup@{identifier}.timer",
-        unit_dir / f"class-checker.cart-window-{identifier}.env",
+        unit_dir / f"{collector_prefix}{identifier}.timer",
+        unit_dir / f"{cleanup_prefix}{identifier}.timer",
+        unit_dir / f"{environment_prefix}{identifier}.env",
     )
 
 
 def cleanup_window(
     identifier: str,
     *,
+    kind: str = "cart",
     unit_dir: Path,
     systemctl: str,
     lock_path: Path | None,
     wait_timeout: float,
     poll_interval: float,
 ) -> int:
-    collector_timer = f"class-checker.cart@{identifier}.timer"
-    collector_service = f"class-checker.cart@{identifier}.service"
-    cleanup_timer = f"class-checker.cart-cleanup@{identifier}.timer"
-    timer_path, cleanup_path, env_path = _window_paths(unit_dir, identifier)
+    collector_prefix, cleanup_prefix, _ = _window_prefixes(kind)
+    collector_timer = f"{collector_prefix}{identifier}.timer"
+    collector_service = f"{collector_prefix}{identifier}.service"
+    cleanup_timer = f"{cleanup_prefix}{identifier}.timer"
+    timer_path, cleanup_path, env_path = _window_paths(unit_dir, identifier, kind)
 
     # Stop only future timer activations. Never stop the collector service: the
     # final 16:00 run must be allowed to finish naturally.
@@ -167,6 +192,7 @@ def cleanup_window(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--window-id", required=True)
+    parser.add_argument("--kind", choices=("cart", "enrollment"), default="cart")
     parser.add_argument("--unit-dir", type=Path, default=default_unit_dir())
     parser.add_argument("--systemctl", default=os.environ.get("SYSTEMCTL", "systemctl"))
     parser.add_argument("--lock-path", type=Path, default=None)
@@ -181,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return cleanup_window(
             args.window_id,
+            kind=args.kind,
             unit_dir=args.unit_dir,
             systemctl=args.systemctl,
             lock_path=args.lock_path,

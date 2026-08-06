@@ -17,6 +17,34 @@ trend samples.
 
 Plan date: 2026-08-04; last operational audit: 2026-08-05
 
+## Enrollment window extension (2026-08-06)
+
+The live schedule table at `https://sugang.snu.ac.kr/sugang/co/co010.action`
+was checked on 2026-08-06. It lists first-come registration on 2026-08-07,
+2026-08-10, and 2026-08-11, each from 08:30 through 16:30. 2026-08-12 is
+not a registration date and is intentionally excluded.
+
+The reusable enrollment launcher and units are implemented:
+
+- `scripts/start-enrollment-window` accepts an ascending list of dates and
+  explicit ten-minute-aligned start/end times.
+- `class-checker.enrollment@.service` runs `COUNT_MODE=enrollment`, while the
+  generated environment restricts `ENROLL_WINDOWS` to the requested dates and
+  clears `CART_WINDOWS`.
+- One timer emits 49 inclusive runs per date (147 total); a persistent cleanup
+  timer runs at 16:40 on the last date and uses the existing lock and
+  `Result=success` cleanup gate.
+- The canonical 2026-2 enrollment windows now represent 8/7 and 8/10–8/11 as
+  disjoint dates, so the weekend is not treated as a collection window.
+
+The schedule and no-start installation tests pass, and the service templates
+pass `systemd-analyze verify`. The user units were installed and enabled on
+2026-08-06 as
+`class-checker.enrollment@20260807-20260810-20260811.timer` and
+`class-checker.enrollment-cleanup@20260807-20260810-20260811.timer`; the live
+collection and journal verification for 8/7–8/11 remain pending until those
+dates execute.
+
 Related audit note:
 `docs/superpowers/audits/2026-08-03-class-checker-blockers.md`
 

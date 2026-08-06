@@ -116,13 +116,15 @@
      should show.</p>
 
   <h3 id="window-config"><code>collect.env</code> mapping</h3>
-  <pre><code><span class="cmt"># 2026-2학기 — from sugang co010.action (read 2026-07-04). List item = "DAY" or "START..END".</span>
+<pre><code><span class="cmt"># 2026-2학기 — from sugang co010.action (read 2026-08-06). List item = "DAY" or "START..END".</span>
 	CART_WINDOWS=2026-08-04..2026-08-05
-ENROLL_WINDOWS=2026-07-30..2026-07-31,2026-08-07..2026-08-11,2026-08-28..2026-08-31,2026-09-01..2026-09-09</code></pre>
+ENROLL_WINDOWS=2026-07-30..2026-07-31,2026-08-07,2026-08-10..2026-08-11,2026-08-28..2026-08-31,2026-09-01..2026-09-09</code></pre>
   <div class="callout"><span class="ic">🧩</span>
     <p><code>_in_windows()</code> samples on ANY match, so the configured 담기 span and the
        four enrolment spans are captured while the 확정 days and the ~16-day
-       08-12~08-27 gap stay dark. If a <code>_WINDOWS</code> var is unset the crawler
+       08-12~08-27 gap stay dark. The bounded enrollment timer further restricts
+       the live 2026-08-07, 08-10, and 08-11 runs to 08:30–16:30. If a
+       <code>_WINDOWS</code> var is unset the crawler
        falls back to the legacy single <code>CART_START/END</code> +
        <code>ENROLL_START/END</code> window (behaviour unchanged).</p></div>
 

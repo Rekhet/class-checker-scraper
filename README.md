@@ -48,6 +48,26 @@ Use `--dry-run` to print the exact schedule without changing systemd. The
 launcher creates a collector timer for every ten minutes through the next
 day's 16:00 run and a cleanup timer at 16:10.
 
+## Start the bounded enrollment window
+
+The first-come registration days use a separate enrollment-only timer:
+
+```sh
+./scripts/start-enrollment-window \
+  --dates 2026-08-07,2026-08-10,2026-08-11 \
+  --start-time 08:30 \
+  --end-time 16:30 \
+  --year 2026 \
+  --semester fall \
+  --timezone Asia/Seoul \
+  --disable-broad-timer
+```
+
+It runs every ten minutes, inclusive, on exactly those three dates (147 runs
+total), records enrollment counts rather than cart counts, and cleans up at
+16:40 on 2026-08-11. Use `--dry-run` before installation to inspect the exact
+calendar schedule.
+
 ## Runtime safety and recovery
 
 Every database, export, and publication writer cooperates through the advisory
@@ -86,5 +106,7 @@ The remaining hardening items are recorded in the [implementation plan](docs/sup
 systemd-analyze verify systemd/class-checker.update.service \
   systemd/class-checker.update.timer \
   systemd/class-checker.update-counts.service \
-  systemd/class-checker.update-counts.timer
+  systemd/class-checker.update-counts.timer \
+  systemd/class-checker.enrollment@.service \
+  systemd/class-checker.enrollment-cleanup@.service
 ```
