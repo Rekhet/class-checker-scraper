@@ -42,6 +42,9 @@ systemctl --user enable --now class-checker.update.timer
   --dates 2026-08-07,2026-08-10,2026-08-11 \
   --start-time 08:30 \
   --end-time 16:30 \
+  --burst-minutes 30 \
+  --burst-interval 5 \
+  --interval 10 \
   --year 2026 \
   --semester fall \
   --timezone Asia/Seoul \
@@ -53,6 +56,13 @@ systemctl --user enable --now class-checker.update.timer
        counts on the listed registration days. Both use the same host-local
        <code>data/.crawl.lock</code>, including JSON export and Git publication. The old broad
        <code>class-checker.update-counts.timer</code> should remain disabled.</p></div>
+  <p>The enrollment timer samples every five minutes for the first 30 minutes
+     of each listed date, including both endpoints, then every ten minutes
+     through the 16:30 end time. The current three-date window therefore has
+     52 runs per date and 156 runs total. The cadence options are explicit in
+     the installation command so a future semester can reproduce the same
+     schedule. They do not change shared-lock ordering against the hourly full
+     update.</p>
   <p>Frequent bounded trend runs commit their generated JSON in the public
      <code>web/</code> repository but do not push each commit. The hourly
      <code>class-checker.update.timer</code> performs the full update and is the

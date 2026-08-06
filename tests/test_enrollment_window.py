@@ -27,10 +27,23 @@ class EnrollmentWindowScheduleTests(unittest.TestCase):
 
         schedule = build_collection_schedule(dates, start_time, end_time)
 
-        self.assertEqual(len(schedule), 147)
+        self.assertEqual(len(schedule), 156)
         self.assertEqual(schedule[0], dt.datetime(2026, 8, 7, 8, 30))
-        self.assertEqual(schedule[48], dt.datetime(2026, 8, 7, 16, 30))
-        self.assertEqual(schedule[49], dt.datetime(2026, 8, 10, 8, 30))
+        self.assertEqual(
+            schedule[:7],
+            (
+                dt.datetime(2026, 8, 7, 8, 30),
+                dt.datetime(2026, 8, 7, 8, 35),
+                dt.datetime(2026, 8, 7, 8, 40),
+                dt.datetime(2026, 8, 7, 8, 45),
+                dt.datetime(2026, 8, 7, 8, 50),
+                dt.datetime(2026, 8, 7, 8, 55),
+                dt.datetime(2026, 8, 7, 9, 0),
+            ),
+        )
+        self.assertEqual(schedule[7], dt.datetime(2026, 8, 7, 9, 10))
+        self.assertEqual(schedule[51], dt.datetime(2026, 8, 7, 16, 30))
+        self.assertEqual(schedule[52], dt.datetime(2026, 8, 10, 8, 30))
         self.assertNotIn(dt.datetime(2026, 8, 8, 8, 30), schedule)
         self.assertNotIn(dt.datetime(2026, 8, 12, 8, 30), schedule)
         self.assertEqual(schedule[-1], dt.datetime(2026, 8, 11, 16, 30))
@@ -61,6 +74,69 @@ class EnrollmentWindowScheduleTests(unittest.TestCase):
         )
         self.assertIn("CART_WINDOWS=", environment)
 
+    def test_schedule_accepts_explicit_burst_and_regular_intervals(self) -> None:
+        dates = parse_dates("2026-08-07")
+
+        schedule = build_collection_schedule(
+            dates,
+            parse_time("08:30"),
+            parse_time("09:30"),
+            burst_minutes=10,
+            burst_interval_minutes=5,
+            interval_minutes=10,
+        )
+
+        self.assertEqual(
+            schedule,
+            (
+                dt.datetime(2026, 8, 7, 8, 30),
+                dt.datetime(2026, 8, 7, 8, 35),
+                dt.datetime(2026, 8, 7, 8, 40),
+                dt.datetime(2026, 8, 7, 8, 50),
+                dt.datetime(2026, 8, 7, 9, 0),
+                dt.datetime(2026, 8, 7, 9, 10),
+                dt.datetime(2026, 8, 7, 9, 20),
+                dt.datetime(2026, 8, 7, 9, 30),
+            ),
+        )
+
+    def test_dry_run_wires_cli_cadence_options(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(root / "scripts" / "start_enrollment_window.py"),
+                "--dates",
+                "2026-08-07",
+                "--start-time",
+                "08:30",
+                "--end-time",
+                "09:30",
+                "--burst-minutes",
+                "10",
+                "--burst-interval",
+                "5",
+                "--interval",
+                "10",
+                "--year",
+                "2026",
+                "--semester",
+                "fall",
+                "--timezone",
+                "Asia/Seoul",
+                "--dry-run",
+            ],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("window=20260807 collector_runs=8", result.stdout)
+        self.assertIn("2026-08-07 08:35:00 Asia/Seoul", result.stdout)
+        self.assertIn("2026-08-07 08:50:00 Asia/Seoul", result.stdout)
+
     def test_cleanup_is_ten_minutes_after_last_collection(self) -> None:
         dates = parse_dates("2026-08-07,2026-08-10,2026-08-11")
 
@@ -74,8 +150,9 @@ class EnrollmentWindowScheduleTests(unittest.TestCase):
             parse_dates("2026-08-07,2026-08-07")
         with self.assertRaises(ValueError):
             parse_time("8:30")
+        self.assertEqual(parse_time("08:35"), dt.time(8, 35))
         with self.assertRaises(ValueError):
-            parse_time("08:35")
+            parse_time("08:33")
 
     def test_no_start_installs_reusable_units_and_one_multi_date_timer(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -114,7 +191,9 @@ class EnrollmentWindowScheduleTests(unittest.TestCase):
                 "class-checker.enrollment@20260807-20260810-20260811.timer"
             )
             self.assertTrue(timer.exists())
-            self.assertEqual(timer.read_text(encoding="utf-8").count("OnCalendar="), 147)
+            self.assertEqual(
+                timer.read_text(encoding="utf-8").count("OnCalendar="), 156
+            )
             self.assertTrue(
                 (
                     unit_dir

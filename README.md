@@ -57,16 +57,21 @@ The first-come registration days use a separate enrollment-only timer:
   --dates 2026-08-07,2026-08-10,2026-08-11 \
   --start-time 08:30 \
   --end-time 16:30 \
+  --burst-minutes 30 \
+  --burst-interval 5 \
+  --interval 10 \
   --year 2026 \
   --semester fall \
   --timezone Asia/Seoul \
   --disable-broad-timer
 ```
 
-It runs every ten minutes, inclusive, on exactly those three dates (147 runs
-total), records enrollment counts rather than cart counts, and cleans up at
-16:40 on 2026-08-11. Use `--dry-run` before installation to inspect the exact
-calendar schedule.
+It collects every five minutes for the first 30 minutes of each date
+(08:30–09:00 inclusive), then every ten minutes from 09:10 through 16:30.
+That is 52 runs per date, 156 total on exactly those three dates. It records
+enrollment counts rather than cart counts and cleans up at 16:40 on
+2026-08-11. Use `--dry-run` before installation to inspect the exact calendar
+schedule. The shared lock and hourly-run overlap behavior are unchanged.
 
 ## Runtime safety and recovery
 

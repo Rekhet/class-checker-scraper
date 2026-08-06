@@ -102,6 +102,9 @@ timer after the final date:
   --dates 2026-08-07,2026-08-10,2026-08-11 \
   --start-time 08:30 \
   --end-time 16:30 \
+  --burst-minutes 30 \
+  --burst-interval 5 \
+  --interval 10 \
   --year 2026 \
   --semester fall \
   --timezone Asia/Seoul \
@@ -109,12 +112,18 @@ timer after the final date:
 ```
 
 The 2026-2 portal schedule lists 08:30–16:30 for all three dates. The timer
-therefore creates 49 runs per date, 147 total, and does not run on the weekend
-or on 8/12. Its environment selects `COUNT_MODE=enrollment`, so samples record
-the live applied/enrolled group and leave cart sampling disabled. Cleanup runs
-at 16:40 on 8/11, waits for the final service and shared lock, and removes only
-the generated enrollment-window files after the same success gate used by the
-cart cleanup.
+therefore creates seven five-minute burst runs from 08:30 through 09:00,
+followed by ten-minute runs from 09:10 through 16:30: 52 runs per date, 156
+total. It does not run on the weekend or on 8/12. Its environment selects
+`COUNT_MODE=enrollment`, so samples record the live applied/enrolled group and
+leave cart sampling disabled. Cleanup runs at 16:40 on 8/11, waits for the
+final service and shared lock, and removes only the generated
+enrollment-window files after the same success gate used by the cart cleanup.
+
+The `--burst-minutes`, `--burst-interval`, and `--interval` options make the
+cadence explicit for future semesters. This change does not give the bounded
+worker priority over the hourly full-update timer; overlapping services still
+serialize through `data/.crawl.lock` under the documented lock-wait policy.
 
 Use `--dry-run` to inspect the exact schedule without writing units or starting
 systemd. The launcher rejects duplicate or unsorted dates and a second

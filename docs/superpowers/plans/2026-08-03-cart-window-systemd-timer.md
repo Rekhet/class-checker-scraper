@@ -15,7 +15,7 @@ installed user units were refreshed and reloaded. The mitigation was verified by
 the 01:00 collector run, which completed 8,625/8,625 classes and exported 96
 trend samples.
 
-Plan date: 2026-08-04; last operational audit: 2026-08-05
+Plan date: 2026-08-04; last operational audit: 2026-08-06
 
 ## Enrollment window extension (2026-08-06)
 
@@ -27,19 +27,27 @@ not a registration date and is intentionally excluded.
 The reusable enrollment launcher and units are implemented:
 
 - `scripts/start-enrollment-window` accepts an ascending list of dates and
-  explicit ten-minute-aligned start/end times.
+  explicit five-minute-aligned start/end times, with configurable initial-burst
+  and regular intervals.
 - `class-checker.enrollment@.service` runs `COUNT_MODE=enrollment`, while the
   generated environment restricts `ENROLL_WINDOWS` to the requested dates and
   clears `CART_WINDOWS`.
-- One timer emits 49 inclusive runs per date (147 total); a persistent cleanup
-  timer runs at 16:40 on the last date and uses the existing lock and
-  `Result=success` cleanup gate.
+- The default timer emits seven five-minute runs from 08:30 through 09:00,
+  followed by ten-minute runs from 09:10 through 16:30: 52 inclusive runs per
+  date (156 total). A persistent cleanup timer runs at 16:40 on the last date
+  and uses the existing lock and `Result=success` cleanup gate.
 - The canonical 2026-2 enrollment windows now represent 8/7 and 8/10–8/11 as
   disjoint dates, so the weekend is not treated as a collection window.
 
+The explicit installation options are `--burst-minutes 30`, `--burst-interval 5`,
+and `--interval 10`. They make the cadence reproducible for a future semester.
+This cadence change does not alter the hourly full-update timer or create lock
+priority; overlapping services remain serialized by the shared lock and subject
+to the deferred lock-wait retry policy.
+
 The schedule and no-start installation tests pass, and the service templates
-pass `systemd-analyze verify`. The user units were installed and enabled on
-2026-08-06 as
+pass `systemd-analyze verify`. The user units were regenerated with 156
+`OnCalendar` entries and reloaded, enabled, and started on 2026-08-06 as
 `class-checker.enrollment@20260807-20260810-20260811.timer` and
 `class-checker.enrollment-cleanup@20260807-20260810-20260811.timer`; the live
 collection and journal verification for 8/7–8/11 remain pending until those
