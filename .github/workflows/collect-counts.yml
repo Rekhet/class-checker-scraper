@@ -22,7 +22,7 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -42,10 +42,13 @@ jobs:
       - name: Install Chromium
         run: uv run playwright install --with-deps chromium
 
+      # cloud_collect bootstraps a local scratch DB from the cloud catalog,
+      # crawls against it (a long-lived remote connection would hit Turso's
+      # interactive-stream expiry), then pushes the samples back in batches.
       - name: Collect windowed counts
         env:
-          DB_BACKEND: turso
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-        run: ./refresh.sh --year 2026 --collect enrollment --windowed fall
-# (registration nudge)
+        run: |
+          set -a; . ./collect.env; set +a
+          uv run python -m scraper.cloud_collect --year 2026 --semester fall
