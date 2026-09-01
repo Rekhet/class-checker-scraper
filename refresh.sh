@@ -67,6 +67,10 @@ Examples
 EOF
 }
 
+# Keep the original CLI for the process-lock re-exec below — the parse loop
+# consumes $@ with shift, which used to re-exec with no arguments at all.
+ORIG_ARGS=("$@")
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --collect)           EXTRA+=("$1" "$2"); collection_selected=1; shift 2;;
@@ -124,7 +128,7 @@ fi
 # A wrapper that already owns it marks the environment so this entry point can
 # still be called directly without deadlocking when nested under update.sh.
 if [ "${CLASS_CHECKER_PROCESS_LOCK_HELD:-}" != "1" ]; then
-  exec "$PY" -m scraper.process_lock --timeout "${CRAWL_LOCK_TIMEOUT:-900}" -- "$0" "$@"
+  exec "$PY" -m scraper.process_lock --timeout "${CRAWL_LOCK_TIMEOUT:-900}" -- "$0" ${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}
 fi
 echo "refreshing years=$YEARS terms=$TERMS ${EXTRA[*]:-}" >&2
 exec "${CMD[@]}"
