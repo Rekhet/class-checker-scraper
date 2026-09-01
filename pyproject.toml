@@ -39,7 +39,7 @@ build-backend = "setuptools.build_meta"
 # (import db, import crawl, ...). Map that directory so the project stays
 # importable when installed in editable mode for development.
 [tool.setuptools]
-py-modules = ["crawl", "db", "excel", "migrate_to_turso", "parse", "process_lock", "server", "session"]
+py-modules = ["crawl", "db", "excel", "migrate_to_turso", "parse", "process_lock", "pull_counts", "server", "session"]
 
 [tool.setuptools.package-dir]
 "" = "scraper"
