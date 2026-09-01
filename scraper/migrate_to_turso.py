@@ -23,6 +23,33 @@ import process_lock
 
 COPY_ORDER = ["terms", "classes", "class_slots", "crawl_runs"]   # FK-safe insert
 
+# SQLite's default positional-parameter cap is 999; stay under it per statement.
+_MAX_PARAMS_PER_STATEMENT = 900
+
+
+def _insert_chunked(dst, table: str, cols: list[str], rows, *,
+                    chunk_rows: int | None = None) -> int:
+    """Insert rows with multi-VALUES statements; returns statements executed.
+
+    A remote libSQL connection pays one network round trip per execute(), so
+    row-at-a-time executemany makes a large copy take hours. Packing many rows
+    into each INSERT keeps the round-trip count proportional to row_count /
+    chunk_rows instead.
+    """
+    if not rows:
+        return 0
+    if chunk_rows is None:
+        chunk_rows = max(1, _MAX_PARAMS_PER_STATEMENT // len(cols))
+    one = "(" + ",".join("?" * len(cols)) + ")"
+    prefix = f"INSERT INTO {table} ({','.join(cols)}) VALUES "
+    statements = 0
+    for i in range(0, len(rows), chunk_rows):
+        chunk = rows[i:i + chunk_rows]
+        params = [v for row in chunk for v in row]
+        dst.execute(prefix + ",".join([one] * len(chunk)), params)
+        statements += 1
+    return statements
+
 
 def migrate(src_path=db.DB_PATH) -> dict:
     src = sqlite3.connect(str(src_path))
@@ -45,11 +72,7 @@ def migrate(src_path=db.DB_PATH) -> dict:
         if not rows:
             continue
         cols = list(rows[0].keys())
-        ph = ",".join("?" * len(cols))
-        dst.executemany(
-            f"INSERT INTO {t} ({','.join(cols)}) VALUES ({ph})",
-            [tuple(r[c] for c in cols) for r in rows],
-        )
+        _insert_chunked(dst, t, cols, [tuple(r[c] for c in cols) for r in rows])
         dst.commit()
     dst.sync()
     src.close()
