@@ -581,6 +581,22 @@ def insert_chunked(conn, table: str, cols, rows, *, chunk_rows: int | None = Non
     return statements
 
 
+def _collection_now():
+    """Naive wall-clock now in COLLECTION_TIMEZONE (host-local when unset).
+
+    Sample timestamps are stored as naive local strings; a runner whose
+    process timezone differs (e.g. a UTC CI host) must not mix offsets into
+    the 인원 추이 series."""
+    from datetime import datetime
+
+    name = (os.environ.get("COLLECTION_TIMEZONE") or "").strip()
+    if not name:
+        return datetime.now()
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo(name)).replace(tzinfo=None)
+
+
 def sample_counts(conn: sqlite3.Connection, year_terms, ts: str | None = None,
                   keep_days: int = 120, collect_cart: bool = True,
                   collect_enrolled: bool = True,
@@ -598,7 +614,7 @@ def sample_counts(conn: sqlite3.Connection, year_terms, ts: str | None = None,
     When BOTH are False (outside every window) nothing is inserted at all, so the
     인원 추이 trend stays frozen off-season instead of accruing flat samples."""
     from datetime import datetime, timedelta
-    ts = ts or datetime.now().isoformat(timespec="seconds")
+    ts = ts or _collection_now().isoformat(timespec="seconds")
     if not collect_cart and not collect_enrolled:
         return 0   # outside every collection window: record nothing (인원 추이 frozen)
     n = 0
@@ -617,7 +633,7 @@ def sample_counts(conn: sqlite3.Connection, year_terms, ts: str | None = None,
               r["quota"]) for r in rows])
         n += len(rows)
     if keep_days:
-        cutoff = (datetime.now() - timedelta(days=keep_days)).isoformat(timespec="seconds")
+        cutoff = (_collection_now() - timedelta(days=keep_days)).isoformat(timespec="seconds")
         conn.execute("DELETE FROM count_samples WHERE ts < ?", (cutoff,))
     conn.commit()
     return n

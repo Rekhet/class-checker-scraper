@@ -57,6 +57,26 @@ class SampleCountsBatchingTests(unittest.TestCase):
         # INSERTs, never one per row
         self.assertLessEqual(conn.insert_statements, 5)
 
+    def test_default_sample_ts_uses_collection_timezone(self) -> None:
+        """A runner whose clock is UTC must still stamp samples in the
+        configured collection timezone, or the 인원 추이 series mixes offsets."""
+        import datetime as dt
+        import os
+        from unittest import mock
+        from zoneinfo import ZoneInfo
+
+        conn = self._conn(1)
+        with mock.patch.dict(os.environ, {"COLLECTION_TIMEZONE": "Asia/Seoul"}):
+            db.sample_counts(conn, [("2026", "T1")],
+                             collect_cart=False, collect_enrolled=True)
+        ts = conn.execute("SELECT ts FROM count_samples").fetchone()[0]
+
+        expected = dt.datetime.now(ZoneInfo("Asia/Seoul"))
+        got = dt.datetime.fromisoformat(ts)
+        self.assertIsNone(got.tzinfo)   # stored naive, like every existing row
+        delta = abs((expected.replace(tzinfo=None) - got).total_seconds())
+        self.assertLess(delta, 60, f"ts {ts} not in Asia/Seoul wall-clock time")
+
     def test_insert_chunked_available_from_db(self) -> None:
         raw = sqlite3.connect(":memory:")
         raw.execute("CREATE TABLE t (a INTEGER, b TEXT)")
