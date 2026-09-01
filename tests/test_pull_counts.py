@@ -73,6 +73,29 @@ class MergeSamplesTests(unittest.TestCase):
         ).fetchall()
         self.assertEqual({t for (t,) in got}, {"2026-09-01T09:10:00"})
 
+    def test_fetches_source_rows_in_per_ts_pages(self) -> None:
+        """One huge SELECT over a remote libsql stream dies with EOF errors;
+        the source must be read one ts group at a time."""
+        src_raw = _db([ROW_A, ROW_B, ROW_C])
+        selects: list[str] = []
+
+        class _SpySrc:
+            def execute(self, sql, params=()):
+                if sql.lstrip().upper().startswith("SELECT"):
+                    selects.append(sql)
+                return src_raw.execute(sql, params)
+
+        dst = _db()
+
+        result = merge_samples(_SpySrc(), dst)
+
+        self.assertEqual(result["inserted"], 3)
+        self.assertTrue(any("DISTINCT" in s.upper() for s in selects))
+        # every row-fetching SELECT is scoped to a single ts
+        row_selects = [s for s in selects if "DISTINCT" not in s.upper()]
+        self.assertTrue(row_selects)
+        self.assertTrue(all("ts = ?" in s or "ts=?" in s for s in row_selects))
+
     def test_empty_source_keeps_cursor(self) -> None:
         src = _db()
         dst = _db()

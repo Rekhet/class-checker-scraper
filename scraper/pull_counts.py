@@ -38,28 +38,39 @@ _INSERT = (
 def merge_samples(src, dst, since_ts: str | None = None) -> dict:
     """Copy count_samples rows from src into dst, skipping existing keys.
 
+    The source is read one ts group (~one collection pass) at a time: a single
+    SELECT over a large remote backlog dies mid-stream ("unexpected EOF"), and
+    per-ts pages keep each read small while the natural-key dedupe keeps a
+    partially merged run safe to repeat.
+
     Returns {"inserted": n, "max_ts": ts} where max_ts is the newest source ts
     seen (or since_ts unchanged when the source tail is empty) — the caller's
     cursor for the next pull.
     """
-    query = f"SELECT {_COLS} FROM count_samples"
+    ts_query = "SELECT DISTINCT ts FROM count_samples"
     params: tuple = ()
     if since_ts is not None:
-        query += " WHERE ts > ?"
+        ts_query += " WHERE ts > ?"
         params = (since_ts,)
-    rows = src.execute(query, params).fetchall()
+    ts_values = sorted(t for (t,) in src.execute(ts_query, params).fetchall())
 
     inserted = 0
+    total = 0
     max_ts = since_ts
-    for row in rows:
-        row = tuple(row)
-        cur = dst.execute(_INSERT, row + row[:5])
-        inserted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
-        ts = row[4]
+    for ts in ts_values:
+        rows = src.execute(
+            f"SELECT {_COLS} FROM count_samples WHERE ts = ?", (ts,)
+        ).fetchall()
+        for row in rows:
+            row = tuple(row)
+            cur = dst.execute(_INSERT, row + row[:5])
+            inserted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        dst.commit()
+        total += len(rows)
         if max_ts is None or ts > max_ts:
             max_ts = ts
     dst.commit()
-    return {"inserted": inserted, "rows": len(rows), "max_ts": max_ts}
+    return {"inserted": inserted, "rows": total, "max_ts": max_ts}
 
 
 def _read_state() -> str | None:
