@@ -12,7 +12,10 @@ name: collect-counts
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # offset minutes, not */10: on-the-hour slots (:00/:10/…) are GitHub's
+    # peak-load windows where schedule events are throttled hardest, and
+    # changing the expression forces the scheduler to re-register the cron.
+    - cron: "3,13,23,33,43,53 * * * *"
   workflow_dispatch:
 
 concurrency:
