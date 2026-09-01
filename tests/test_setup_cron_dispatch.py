@@ -15,7 +15,7 @@ class BuildJobPayloadTests(unittest.TestCase):
         self.assertEqual(job["title"], JOB_TITLE)
         self.assertTrue(job["enabled"])
         self.assertEqual(job["requestMethod"], 1)  # POST
-        self.assertEqual(job["schedule"]["minutes"], [3, 13, 23, 33, 43, 53])
+        self.assertEqual(job["schedule"]["minutes"], [0, 10, 20, 30, 40, 50])
         self.assertEqual(job["schedule"]["hours"], [-1])
         self.assertEqual(job["schedule"]["wdays"], [-1])
         self.assertEqual(

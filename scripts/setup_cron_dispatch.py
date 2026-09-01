@@ -28,7 +28,7 @@ WORKFLOW_URL = f"https://api.github.com/repos/{OWNER_REPO}/actions/workflows/{WO
 DISPATCH_URL = f"{WORKFLOW_URL}/dispatches"
 CRONJOB_API = "https://api.cron-job.org"
 JOB_TITLE = "class-checker collect-counts dispatch"
-MINUTES = [3, 13, 23, 33, 43, 53]
+MINUTES = [0, 10, 20, 30, 40, 50]
 
 
 def build_job_payload(github_pat: str) -> dict:
