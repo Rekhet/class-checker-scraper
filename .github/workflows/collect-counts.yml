@@ -1,0 +1,50 @@
+# Periodic 인원 추이 (enrollment counts) collection on GitHub-hosted runners.
+#
+# Every run is gated by collect.env: outside every CART/ENROLL window the
+# --windowed pass exits without crawling, so the schedule can stay enabled
+# year-round at negligible cost. Samples land in the cloud Turso database
+# (secrets TURSO_DATABASE_URL + TURSO_AUTH_TOKEN); the local machine pulls
+# them via an embedded replica (TURSO_SYNC_PATH) for export/publish.
+#
+# NOTE: GitHub cron is best-effort — runs routinely start several minutes
+# late under load. The cadence is "about every 10 minutes", not exact.
+name: collect-counts
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: collect-counts
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra turso --extra speed --extra export
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
+      - name: Install Chromium
+        run: uv run playwright install --with-deps chromium
+
+      - name: Collect windowed counts
+        env:
+          DB_BACKEND: turso
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: ./refresh.sh --year 2026 --collect enrollment --windowed fall
