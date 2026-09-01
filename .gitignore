@@ -50,3 +50,4 @@ __pycache__/
 
 # Remote Turso credentials for the cloud counts pull (never commit).
 /turso-remote.env
+/data/pull_counts.state
