@@ -42,14 +42,16 @@ TERM_CODES = {
 
 
 def _copy_query(remote, local, table: str, where: str = "", params=()) -> int:
-    rows = remote.execute(
+    cur = remote.execute(
         f"SELECT * FROM {table}" + (f" WHERE {where}" if where else ""), params
-    ).fetchall()
+    )
+    # column names via the DB-API cursor description: works for both sqlite3
+    # and libsql connections (libsql rows have no .keys())
+    cols = [d[0] for d in cur.description]
+    rows = cur.fetchall()
     if not rows:
         return 0
-    cols = list(rows[0].keys())
-    db.insert_chunked(local, table, cols,
-                      [tuple(r[c] for c in cols) for r in rows])
+    db.insert_chunked(local, table, cols, [tuple(r) for r in rows])
     return len(rows)
 
 
@@ -91,9 +93,7 @@ def _remote_connect():
         raise SystemExit(
             "error: TURSO_DATABASE_URL must point at the remote Turso database"
         )
-    conn = libsql.connect(url, auth_token=token)
-    conn.row_factory = getattr(__import__("sqlite3"), "Row")
-    return conn
+    return libsql.connect(url, auth_token=token)
 
 
 def main(argv: list[str] | None = None) -> int:
