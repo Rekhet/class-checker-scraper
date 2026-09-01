@@ -553,6 +553,34 @@ def apply_grading(conn: sqlite3.Connection, year: str, term: str,
     return n
 
 
+# SQLite's default positional-parameter cap is 999; stay under it per statement.
+_MAX_PARAMS_PER_STATEMENT = 900
+
+
+def insert_chunked(conn, table: str, cols, rows, *, chunk_rows: int | None = None) -> int:
+    """Insert rows with multi-VALUES statements; returns statements executed.
+
+    A remote libSQL connection pays one network round trip per execute(), so
+    row-at-a-time executemany makes a large insert take minutes to hours.
+    Packing many rows into each INSERT keeps the round-trip count proportional
+    to row_count / chunk_rows instead.
+    """
+    rows = list(rows)
+    if not rows:
+        return 0
+    if chunk_rows is None:
+        chunk_rows = max(1, _MAX_PARAMS_PER_STATEMENT // len(cols))
+    one = "(" + ",".join("?" * len(cols)) + ")"
+    prefix = f"INSERT INTO {table} ({','.join(cols)}) VALUES "
+    statements = 0
+    for i in range(0, len(rows), chunk_rows):
+        chunk = rows[i:i + chunk_rows]
+        params = [v for row in chunk for v in row]
+        conn.execute(prefix + ",".join([one] * len(chunk)), params)
+        statements += 1
+    return statements
+
+
 def sample_counts(conn: sqlite3.Connection, year_terms, ts: str | None = None,
                   keep_days: int = 120, collect_cart: bool = True,
                   collect_enrolled: bool = True,
@@ -578,10 +606,10 @@ def sample_counts(conn: sqlite3.Connection, year_terms, ts: str | None = None,
         rows = conn.execute(
             "SELECT year, term, sbjt_cd, lt_no, applied, cart, enrolled, quota "
             "FROM classes WHERE year=? AND term=?", (year, term)).fetchall()
-        conn.executemany(
-            "INSERT INTO count_samples"
-            "(year, term, sbjt_cd, lt_no, ts, applied, cart, enrolled, quota)"
-            " VALUES (?,?,?,?,?,?,?,?,?)",
+        insert_chunked(
+            conn, "count_samples",
+            ["year", "term", "sbjt_cd", "lt_no", "ts",
+             "applied", "cart", "enrolled", "quota"],
             [(r["year"], r["term"], r["sbjt_cd"], r["lt_no"], ts,
               r["applied"] if collect_applied else None,
               r["cart"] if collect_cart else None,
