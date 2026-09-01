@@ -78,10 +78,24 @@ def build_collection_schedule(
     burst_minutes: int = DEFAULT_BURST_MINUTES,
     burst_interval_minutes: int = DEFAULT_BURST_INTERVAL_MINUTES,
     interval_minutes: int = DEFAULT_INTERVAL_MINUTES,
+    until_midnight: bool = False,
 ) -> tuple[dt.datetime, ...]:
-    """Return the inclusive burst-then-regular collection schedule for each date."""
+    """Return the inclusive burst-then-regular collection schedule for each date.
+
+    With ``until_midnight`` the dates form one continuous window: a single burst
+    on the first date's start time, then regular collections through the nights
+    (``end_time`` is unused) ending exactly at midnight after the last date.
+    """
     if not dates:
         raise ValueError("at least one collection date is required")
+    if until_midnight:
+        return _build_until_midnight_schedule(
+            dates,
+            start_time,
+            burst_minutes=burst_minutes,
+            burst_interval_minutes=burst_interval_minutes,
+            interval_minutes=interval_minutes,
+        )
     if start_time > end_time:
         raise ValueError("collection start time must not be after its end time")
     if burst_minutes < 0:
@@ -130,8 +144,55 @@ def build_collection_schedule(
     return tuple(schedule)
 
 
-def cleanup_time(last_date: dt.date, end_time: dt.time) -> dt.datetime:
+def _build_until_midnight_schedule(
+    dates: tuple[dt.date, ...],
+    start_time: dt.time,
+    *,
+    burst_minutes: int,
+    burst_interval_minutes: int,
+    interval_minutes: int,
+) -> tuple[dt.datetime, ...]:
+    for prev, cur in zip(dates, dates[1:]):
+        if (cur - prev).days != 1:
+            raise ValueError("until-midnight collection requires consecutive dates")
+    if burst_minutes < 0:
+        raise ValueError("initial burst duration must not be negative")
+    if burst_interval_minutes <= 0:
+        raise ValueError("initial burst interval must be positive")
+    if interval_minutes <= 0:
+        raise ValueError("collection interval must be positive")
+    if burst_minutes % burst_interval_minutes:
+        raise ValueError("initial burst duration must be divisible by its interval")
+
+    start = dt.datetime.combine(dates[0], start_time)
+    end = dt.datetime.combine(dates[-1] + dt.timedelta(days=1), dt.time.min)
+    span_minutes = int((end - start).total_seconds() // 60)
+    burst_end_offset = min(burst_minutes, span_minutes)
+    if burst_end_offset % burst_interval_minutes:
+        raise ValueError("collection window must end on an initial burst interval")
+    if (span_minutes - burst_end_offset) % interval_minutes:
+        raise ValueError("collection window must end on a regular collection interval")
+
+    schedule = [
+        start + dt.timedelta(minutes=offset)
+        for offset in range(0, burst_end_offset + 1, burst_interval_minutes)
+    ]
+    schedule.extend(
+        start + dt.timedelta(minutes=offset)
+        for offset in range(
+            burst_end_offset + interval_minutes, span_minutes + 1, interval_minutes
+        )
+    )
+    return tuple(schedule)
+
+
+def cleanup_time(
+    last_date: dt.date, end_time: dt.time, *, until_midnight: bool = False
+) -> dt.datetime:
     """Run cleanup ten minutes after the final collection on the last date."""
+    if until_midnight:
+        final = dt.datetime.combine(last_date + dt.timedelta(days=1), dt.time.min)
+        return final + dt.timedelta(minutes=10)
     return dt.datetime.combine(last_date, end_time) + dt.timedelta(minutes=10)
 
 
@@ -180,9 +241,20 @@ def render_cleanup_timer_unit(
 
 
 def render_window_environment(
-    dates: tuple[dt.date, ...], year: str, semester: str, timezone: str
+    dates: tuple[dt.date, ...],
+    year: str,
+    semester: str,
+    timezone: str,
+    *,
+    until_midnight: bool = False,
 ) -> str:
-    enrollment_windows = ",".join(day.isoformat() for day in dates)
+    if until_midnight:
+        # the midnight run fires on the day after the last date; the crawl gate
+        # compares today against ENROLL_WINDOWS, so the range must cover it
+        after = dates[-1] + dt.timedelta(days=1)
+        enrollment_windows = f"{dates[0].isoformat()}..{after.isoformat()}"
+    else:
+        enrollment_windows = ",".join(day.isoformat() for day in dates)
     return "\n".join(
         (
             f"COUNT_YEAR={year}",
@@ -223,6 +295,7 @@ def install_window(
     burst_minutes: int = DEFAULT_BURST_MINUTES,
     burst_interval_minutes: int = DEFAULT_BURST_INTERVAL_MINUTES,
     interval_minutes: int = DEFAULT_INTERVAL_MINUTES,
+    until_midnight: bool = False,
 ) -> tuple[str, str]:
     """Render one enrollment window and optionally activate its user timers."""
     unit_dir = unit_dir or default_unit_dir()
@@ -258,6 +331,7 @@ def install_window(
         burst_minutes=burst_minutes,
         burst_interval_minutes=burst_interval_minutes,
         interval_minutes=interval_minutes,
+        until_midnight=until_midnight,
     )
     _atomic_write(
         unit_dir / f"{COLLECTOR_TIMER_PREFIX}{identifier}.timer",
@@ -267,13 +341,17 @@ def install_window(
     _atomic_write(
         unit_dir / f"{CLEANUP_TIMER_PREFIX}{identifier}.timer",
         render_cleanup_timer_unit(
-            identifier, cleanup_time(dates[-1], end_time), timezone
+            identifier,
+            cleanup_time(dates[-1], end_time, until_midnight=until_midnight),
+            timezone,
         ),
         0o644,
     )
     _atomic_write(
         unit_dir / f"class-checker.enrollment-window-{identifier}.env",
-        render_window_environment(dates, year, semester, timezone),
+        render_window_environment(
+            dates, year, semester, timezone, until_midnight=until_midnight
+        ),
         0o600,
     )
 
@@ -319,6 +397,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_INTERVAL_MINUTES,
         help="minutes between collections after the initial burst (default: 10)",
     )
+    parser.add_argument(
+        "--until-midnight",
+        action="store_true",
+        help="collect continuously through the nights (ignoring --end-time) "
+        "until midnight after the last date; dates must be consecutive",
+    )
     parser.add_argument("--year", required=True)
     parser.add_argument("--semester", required=True)
     parser.add_argument(
@@ -358,12 +442,13 @@ def main(argv: list[str] | None = None) -> int:
             burst_minutes=args.burst_minutes,
             burst_interval_minutes=args.burst_interval,
             interval_minutes=args.interval,
+            until_midnight=args.until_midnight,
         )
     except ValueError as exc:
         parser.error(str(exc))
 
     identifier = window_id(dates)
-    cleanup = cleanup_time(dates[-1], end_time)
+    cleanup = cleanup_time(dates[-1], end_time, until_midnight=args.until_midnight)
     if args.dry_run:
         print(f"window={identifier} collector_runs={len(schedule)}")
         print("collector_schedule:")
@@ -387,6 +472,7 @@ def main(argv: list[str] | None = None) -> int:
             burst_minutes=args.burst_minutes,
             burst_interval_minutes=args.burst_interval,
             interval_minutes=args.interval,
+            until_midnight=args.until_midnight,
         )
     except (OSError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)

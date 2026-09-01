@@ -100,6 +100,112 @@ class EnrollmentWindowScheduleTests(unittest.TestCase):
             ),
         )
 
+    def test_until_midnight_runs_continuously_to_midnight_after_last_date(self) -> None:
+        dates = parse_dates("2026-09-01")
+
+        schedule = build_collection_schedule(
+            dates,
+            parse_time("23:40"),
+            parse_time("23:40"),  # end time is unused in until-midnight mode
+            burst_minutes=10,
+            burst_interval_minutes=5,
+            interval_minutes=10,
+            until_midnight=True,
+        )
+
+        self.assertEqual(
+            schedule,
+            (
+                dt.datetime(2026, 9, 1, 23, 40),
+                dt.datetime(2026, 9, 1, 23, 45),
+                dt.datetime(2026, 9, 1, 23, 50),
+                dt.datetime(2026, 9, 2, 0, 0),
+            ),
+        )
+
+    def test_until_midnight_collects_overnight_between_consecutive_dates(self) -> None:
+        dates = parse_dates("2026-09-01,2026-09-02")
+
+        schedule = build_collection_schedule(
+            dates, parse_time("08:30"), parse_time("16:30"), until_midnight=True
+        )
+
+        # burst 08:30-09:00 on day one only, then every 10 minutes through the
+        # nights until midnight after the last date
+        self.assertEqual(schedule[0], dt.datetime(2026, 9, 1, 8, 30))
+        self.assertEqual(schedule[6], dt.datetime(2026, 9, 1, 9, 0))
+        self.assertEqual(schedule[7], dt.datetime(2026, 9, 1, 9, 10))
+        self.assertIn(dt.datetime(2026, 9, 1, 23, 50), schedule)
+        self.assertIn(dt.datetime(2026, 9, 2, 0, 0), schedule)
+        self.assertIn(dt.datetime(2026, 9, 2, 8, 30), schedule)
+        self.assertNotIn(dt.datetime(2026, 9, 2, 8, 35), schedule)  # no second burst
+        self.assertEqual(schedule[-1], dt.datetime(2026, 9, 3, 0, 0))
+
+    def test_until_midnight_rejects_non_consecutive_dates(self) -> None:
+        dates = parse_dates("2026-09-01,2026-09-03")
+
+        with self.assertRaises(ValueError):
+            build_collection_schedule(
+                dates, parse_time("08:30"), parse_time("16:30"), until_midnight=True
+            )
+
+    def test_until_midnight_cleanup_is_ten_minutes_after_midnight(self) -> None:
+        dates = parse_dates("2026-09-01,2026-09-02")
+
+        self.assertEqual(
+            cleanup_time(dates[-1], parse_time("16:30"), until_midnight=True),
+            dt.datetime(2026, 9, 3, 0, 10),
+        )
+
+    def test_until_midnight_environment_extends_window_past_last_date(self) -> None:
+        dates = parse_dates("2026-09-01,2026-09-02")
+
+        environment = render_window_environment(
+            dates, "2026", "fall", "Asia/Seoul", until_midnight=True
+        )
+
+        # the midnight run fires on the day AFTER the last date; the crawl gate
+        # checks today against ENROLL_WINDOWS, so the window must cover it
+        self.assertIn(
+            "ENROLL_WINDOWS=2026-09-01..2026-09-03", environment
+        )
+
+    def test_dry_run_wires_until_midnight_option(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(root / "scripts" / "start_enrollment_window.py"),
+                "--dates",
+                "2026-09-01",
+                "--start-time",
+                "23:40",
+                "--burst-minutes",
+                "10",
+                "--burst-interval",
+                "5",
+                "--interval",
+                "10",
+                "--until-midnight",
+                "--year",
+                "2026",
+                "--semester",
+                "fall",
+                "--timezone",
+                "Asia/Seoul",
+                "--dry-run",
+            ],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("window=20260901 collector_runs=4", result.stdout)
+        self.assertIn("2026-09-02 00:00:00 Asia/Seoul", result.stdout)
+        self.assertIn("cleanup_at=2026-09-02 00:10:00 Asia/Seoul", result.stdout)
+
     def test_dry_run_wires_cli_cadence_options(self) -> None:
         root = Path(__file__).resolve().parents[1]
         result = subprocess.run(
