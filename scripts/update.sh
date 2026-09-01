@@ -39,5 +39,18 @@ if [ "${CLASS_CHECKER_PROCESS_LOCK_HELD:-}" != "1" ]; then
 fi
 
 make refresh YEAR="$UPDATE_YEAR" SEM="$UPDATE_SEM" COLLECT="$UPDATE_COLLECTIONS"
+
+# Merge cloud-collected count samples (GitHub Actions collector) into the local
+# catalog before export. Scoped to a subshell so the remote TURSO_* credentials
+# never leak into the local refresh above or the publish below. Non-fatal: a
+# network hiccup should not block publication of the local data.
+if [ -f "$ROOT/turso-remote.env" ]; then
+  (
+    set -a
+    . "$ROOT/turso-remote.env"
+    set +a
+    "$PY" "$ROOT/scraper/pull_counts.py"
+  ) || echo "warn: cloud counts pull failed; publishing local data only" >&2
+fi
 PUBLISH_COMMIT_MESSAGE="${PUBLISH_COMMIT_MESSAGE:-chore(data): update}" \
   "$ROOT/scripts/publish.sh" full
