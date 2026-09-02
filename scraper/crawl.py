@@ -248,7 +248,7 @@ class SnuClient:
 # round-trip latency without leaning on the sugang server — each worker holds
 # at most one request in flight.
 PAGE_WORKERS = 5
-PAGE_RETRIES = 2
+PAGE_RETRIES = 5     # retries after the first attempt (6 tries total per page)
 
 
 def fetch_live_classes(client: SnuClient, year: str, term: str, *,
@@ -268,12 +268,16 @@ def fetch_live_classes(client: SnuClient, year: str, term: str, *,
     parse_response = parse_response or parse.parse_response
 
     def fetch_page(page: int) -> dict:
+        import time as _time
+
         last: Exception | None = None
-        for _ in range(PAGE_RETRIES):
+        for attempt in range(1 + PAGE_RETRIES):
             try:
                 return parse_response(client.search_page(year, term, page=page))
             except Exception as exc:  # noqa: BLE001 - retried, then re-raised
                 last = exc
+                if attempt < PAGE_RETRIES:      # brief linear backoff between tries
+                    _time.sleep(0.5 * (attempt + 1))
         raise last  # type: ignore[misc]
 
     first = fetch_page(1)

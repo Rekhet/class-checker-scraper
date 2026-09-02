@@ -15,10 +15,12 @@ def _page_html(rows):
 class _StubClient:
     """Serves TOTAL classes 10 per page and records request concurrency."""
 
-    def __init__(self, total: int, fail_pages: set[int] = frozenset()):
+    def __init__(self, total: int, fail_pages: set[int] = frozenset(),
+                 failures_per_page: int = 1):
         self.total = total
         self.calls: list[int] = []
         self.failed_once: set[int] = set(fail_pages)
+        self._fail_left = {p: failures_per_page for p in fail_pages}
         self._lock = threading.Lock()
         self._active = 0
         self.max_active = 0
@@ -30,8 +32,8 @@ class _StubClient:
             self.max_active = max(self.max_active, self._active)
         try:
             time.sleep(0.02)   # emulate network latency so overlap is observable
-            if page in self.failed_once:
-                self.failed_once.discard(page)
+            if self._fail_left.get(page, 0) > 0:
+                self._fail_left[page] -= 1
                 raise RuntimeError(f"transient failure on page {page}")
             start = (page - 1) * 10
             rows = [{"sbjt_cd": f"M{i:05d}", "lt_no": "001"}
@@ -75,6 +77,20 @@ class ParallelFetchTests(unittest.TestCase):
 
         self.assertEqual(len(fetched), 50)
         self.assertEqual(client.calls.count(3), 2)  # failed once, retried
+
+    def test_page_survives_up_to_five_transient_failures(self) -> None:
+        client = _StubClient(total=50, fail_pages={3}, failures_per_page=5)
+
+        fetched = self._fetch(client)
+
+        self.assertEqual(len(fetched), 50)
+        self.assertEqual(client.calls.count(3), 6)  # 1 try + 5 retries
+
+    def test_sixth_failure_gives_up(self) -> None:
+        client = _StubClient(total=50, fail_pages={3}, failures_per_page=6)
+
+        with self.assertRaises(RuntimeError):
+            self._fetch(client)
 
     def test_single_page_result_needs_no_extra_requests(self) -> None:
         client = _StubClient(total=7)
