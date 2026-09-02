@@ -243,29 +243,58 @@ class SnuClient:
                                                    extra=extra)).text
 
 
+# Concurrent search-page fetches per term. The server renders 10 rows per page
+# (865 pages for a full term); a handful of parallel workers collapses the
+# round-trip latency without leaning on the sugang server — each worker holds
+# at most one request in flight.
+PAGE_WORKERS = 5
+PAGE_RETRIES = 2
+
+
 def fetch_live_classes(client: SnuClient, year: str, term: str, *,
                        label: str = "", progress: ProgressFn | None = None,
-                       ) -> list[dict]:
+                       workers: int = PAGE_WORKERS,
+                       parse_response=None) -> list[dict]:
     """Fetch and parse every live search result for one term.
 
-    Keeping pagination in one helper ensures the counts updater and diagnostic
-    tools inspect the same complete roster and do not drift into separate page
-    limits or identity handling.
+    Page 1 is fetched alone to learn the total; the remaining pages are
+    fetched by a small worker pool (each page retried once on a transient
+    failure). Keeping pagination in one helper ensures the counts updater and
+    diagnostic tools inspect the same complete roster and do not drift into
+    separate page limits or identity handling.
     """
-    fetched: list[dict] = []
-    page = 1
-    while True:
-        res = parse.parse_response(client.search_page(year, term, page=page))
-        fetched.extend(res["classes"])
-        total = res["total"]
-        if progress:
-            progress({"phase": "counts", "term": term, "label": label,
-                      "slot_index": len(fetched),
-                      "slot_total": total or len(fetched),
-                      "slot_label": "수강인원 갱신"})
-        if res["page_count"] == 0 or len(fetched) >= total:
-            break
-        page += 1
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    parse_response = parse_response or parse.parse_response
+
+    def fetch_page(page: int) -> dict:
+        last: Exception | None = None
+        for _ in range(PAGE_RETRIES):
+            try:
+                return parse_response(client.search_page(year, term, page=page))
+            except Exception as exc:  # noqa: BLE001 - retried, then re-raised
+                last = exc
+        raise last  # type: ignore[misc]
+
+    first = fetch_page(1)
+    fetched: list[dict] = list(first["classes"])
+    total = first["total"]
+    per_page = max(1, first["page_count"] or len(first["classes"]) or 1)
+    if first["page_count"] == 0 or len(fetched) >= total:
+        return fetched
+    pages = -(-total // per_page)
+
+    done = len(fetched)
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = [pool.submit(fetch_page, p) for p in range(2, pages + 1)]
+        for fut in as_completed(futures):
+            res = fut.result()
+            fetched.extend(res["classes"])
+            done = len(fetched)
+            if progress:
+                progress({"phase": "counts", "term": term, "label": label,
+                          "slot_index": done, "slot_total": total or done,
+                          "slot_label": "수강인원 갱신"})
     return fetched
 
 

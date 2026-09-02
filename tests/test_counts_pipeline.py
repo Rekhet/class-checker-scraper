@@ -52,7 +52,8 @@ class CountsPipelineTests(unittest.TestCase):
             )
 
         self.assertEqual(result["fetched"], total)
-        self.assertEqual(pages, list(range(1, total + 1)))
+        # pages arrive in any order (parallel workers) but each exactly once
+        self.assertEqual(sorted(pages), list(range(1, total + 1)))
 
     def test_live_counts_match_unique_catalog_class_when_subh_differs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
