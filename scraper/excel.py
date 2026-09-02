@@ -123,6 +123,7 @@ def parse_excel(content: bytes, year: str, term: str) -> list[dict]:
             "credits": _int(g(r, "학점")),
             "quota": quota, "quota_returning": quota_returning,
             "applied": _int(g(r, "수강신청인원")), "enrolled": None,
+            "cart": _int(g(r, "장바구니신청")),
             "room": _room(g(r, _ROOM_COL)),
             "language": g(r, "강의언어"),       # '영어' / '한국어' / ...
             "status": g(r, "개설상태"),         # '설강' / '폐강대상'

@@ -269,6 +269,30 @@ def fetch_live_classes(client: SnuClient, year: str, term: str, *,
     return fetched
 
 
+def excel_count_fields(row: dict) -> dict:
+    """Map one Excel roster row onto the live-count columns.
+
+    The Excel export's 수강신청인원 is the RAW application count including
+    pending 정원외신청 — the exact value the search HTML reports as 총수강인원
+    (our `enrolled` series) — while the HTML's 신청 column caps at the quota.
+    Reproducing both keeps the two historical series seamless.
+    """
+    raw, quota = row.get("applied"), row.get("quota")
+    applied = raw if raw is None or quota is None else min(raw, quota)
+    return {"applied": applied, "enrolled": raw, "quota": quota,
+            "cart": row.get("cart")}
+
+
+def fetch_excel_counts(client: SnuClient, year: str, term: str) -> list[dict]:
+    """Whole-term live counts in ONE request via the Excel export.
+
+    The export runs the same live query as the search page but returns every
+    class at once, where the HTML endpoint hard-caps at 10 rows per page
+    (865 serial requests for a full term)."""
+    rows = excel.parse_excel(excel.fetch_excel(client, year, term), year, term)
+    return [{**r, **excel_count_fields(r)} for r in rows]
+
+
 def refresh_counts(conn, client: SnuClient, year: str, term: str, *,
                    label: str = "", progress: ProgressFn | None = None,
                    collect_cart: bool = True, collect_enrollment: bool = True,
@@ -287,8 +311,12 @@ def refresh_counts(conn, client: SnuClient, year: str, term: str, *,
         return {"term": term, "fetched": 0, "updated": 0,
                 "skipped": "no live metrics selected"}
 
-    fetched = fetch_live_classes(client, year, term, label=label,
-                                 progress=progress)
+    try:
+        fetched = fetch_excel_counts(client, year, term)
+    except Exception:  # noqa: BLE001 - the paged HTML path still works
+        log.exception("excel counts fetch failed; falling back to paged HTML")
+        fetched = fetch_live_classes(client, year, term, label=label,
+                                     progress=progress)
 
     updated = 0
     for c in fetched:
