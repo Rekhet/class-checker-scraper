@@ -1,0 +1,15 @@
+# One-off: verify that a failed run on the default branch sends the
+# failure-notification email. Delete after the test.
+name: fail-test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deliberate failure (mail delivery test)
+        run: |
+          echo "intentional failure on the default branch"
+          exit 1
