@@ -299,6 +299,12 @@ def fetch_live_classes(client: SnuClient, year: str, term: str, *,
                 progress({"phase": "counts", "term": term, "label": label,
                           "slot_index": done, "slot_total": total or done,
                           "slot_label": "수강인원 갱신"})
+    if len(fetched) < total:
+        # an IP block or maintenance page often comes back as HTTP 200 with
+        # zero parseable rows — fail loudly so the run (and its CI alerting)
+        # reports the loss instead of recording a silently partial pass
+        raise RuntimeError(
+            f"incomplete live fetch for {term}: {len(fetched)}/{total} classes")
     return fetched
 
 

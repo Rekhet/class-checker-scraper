@@ -92,6 +92,29 @@ class ParallelFetchTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self._fetch(client)
 
+    def test_incomplete_result_raises_instead_of_returning_partial(self) -> None:
+        """An IP block often yields HTTP 200 with a block page that parses to
+        zero rows — no exception, silently missing data. The fetch must fail
+        loudly when the roster comes back short of the reported total."""
+        client = _StubClient(total=50)
+        real = client.search_page
+
+        def truncated(year, term, *, page=1, **kw):
+            res = real(year, term, page=page, **kw)
+            if page == 4:
+                res = {"classes": [], "total": res["total"], "page_count": 0}
+            return res
+
+        client.search_page = truncated
+
+        with self.assertRaisesRegex(RuntimeError, "incomplete"):
+            self._fetch(client)
+
+    def test_empty_term_is_not_an_error(self) -> None:
+        client = _StubClient(total=0)
+
+        self.assertEqual(self._fetch(client), [])
+
     def test_single_page_result_needs_no_extra_requests(self) -> None:
         client = _StubClient(total=7)
 
