@@ -1,9 +1,14 @@
-# One-off: verify that a failed run on the default branch sends the
-# failure-notification email. Delete after the test.
+# One-off: compare failure-mail delivery between trigger types.
+# push-triggered failures mail the pusher (the classic CI-failed email);
+# this tests whether that path works here where dispatch/schedule did not.
+# Delete after the test.
 name: fail-test
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/fail-test.yml"
 
 jobs:
   fail:
@@ -11,5 +16,5 @@ jobs:
     steps:
       - name: Deliberate failure (mail delivery test)
         run: |
-          echo "intentional failure on the default branch"
+          echo "intentional failure — push-trigger mail test"
           exit 1
