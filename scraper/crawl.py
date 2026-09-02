@@ -284,72 +284,13 @@ def excel_count_fields(row: dict) -> dict:
 
 
 def fetch_excel_counts(client: SnuClient, year: str, term: str) -> list[dict]:
-    """Whole-term live counts in ONE request via the Excel export.
-
-    The export runs the same live query as the search page but returns every
-    class at once, where the HTML endpoint hard-caps at 10 rows per page
-    (865 serial requests for a full term)."""
+    """Whole-term counts in ONE request via the Excel export — NOT the wired
+    collection path. The export returns every class at once (the HTML endpoint
+    hard-caps at 10 rows per page), but its freshness cannot be verified short
+    of a full HTML crawl, so live collection stays on the paged HTML. Kept as
+    a diagnostic/comparison tool."""
     rows = excel.parse_excel(excel.fetch_excel(client, year, term), year, term)
     return [{**r, **excel_count_fields(r)} for r in rows]
-
-
-# Excel liveness gate: spot-check pages fetched per run, and the mismatch
-# fraction above which the run distrusts the Excel snapshot entirely.
-LIVE_GATE_PAGES = 2
-LIVE_GATE_TOLERANCE = 1          # |delta| <= 1 is live churn between fetches
-LIVE_GATE_MAX_MISMATCH = 0.3
-
-
-def excel_live_mismatches(excel_by_key: dict, html_classes) -> tuple[int, int]:
-    """Compare live HTML rows against the Excel snapshot; return (checked, bad).
-
-    The Excel export has historically been suspected of lagging the live
-    search counts, so every Excel-based pass spot-checks a couple of HTML
-    pages. A |delta| of at most LIVE_GATE_TOLERANCE on either metric is
-    normal churn between the two fetches; anything larger — or a class the
-    Excel is missing — counts as a mismatch. Null metrics are skipped: they
-    carry no liveness signal.
-    """
-    checked = bad = 0
-    for c in html_classes:
-        pairs = []
-        ex = excel_by_key.get((c["sbjt_cd"], c["lt_no"]))
-        for field in ("applied", "enrolled"):
-            live = c.get(field)
-            if live is None:
-                continue
-            pairs.append((live, ex.get(field) if ex else None))
-        if not pairs:
-            continue
-        checked += 1
-        for live, snap in pairs:
-            if snap is None or abs(live - snap) > LIVE_GATE_TOLERANCE:
-                bad += 1
-                break
-    return checked, bad
-
-
-def _excel_snapshot_is_live(client: SnuClient, year: str, term: str,
-                            fetched: list[dict]) -> bool:
-    """Spot-check the Excel snapshot against a few live HTML pages."""
-    import random
-
-    by_key = {(r["sbjt_cd"], r["lt_no"]): r for r in fetched}
-    first = parse.parse_response(client.search_page(year, term, page=1))
-    html_rows = list(first["classes"])
-    total_pages = max(1, -(-int(first["total"] or 10) // 10))
-    for page in random.sample(range(2, total_pages + 1),
-                              k=min(LIVE_GATE_PAGES - 1, max(0, total_pages - 1))):
-        html_rows.extend(parse.parse_response(
-            client.search_page(year, term, page=page))["classes"])
-    checked, bad = excel_live_mismatches(by_key, html_rows)
-    if checked and bad / checked > LIVE_GATE_MAX_MISMATCH:
-        log.warning("excel snapshot failed the liveness gate for %s: "
-                    "%d/%d spot-checked classes deviate beyond ±%d — "
-                    "falling back to the paged HTML crawl",
-                    term, bad, checked, LIVE_GATE_TOLERANCE)
-        return False
-    return True
 
 
 def refresh_counts(conn, client: SnuClient, year: str, term: str, *,
@@ -370,17 +311,8 @@ def refresh_counts(conn, client: SnuClient, year: str, term: str, *,
         return {"term": term, "fetched": 0, "updated": 0,
                 "skipped": "no live metrics selected"}
 
-    fetched = None
-    try:
-        fetched = fetch_excel_counts(client, year, term)
-        if not _excel_snapshot_is_live(client, year, term, fetched):
-            fetched = None   # stale snapshot: distrust the whole run
-    except Exception:  # noqa: BLE001 - the paged HTML path still works
-        log.exception("excel counts fetch failed; falling back to paged HTML")
-        fetched = None
-    if fetched is None:
-        fetched = fetch_live_classes(client, year, term, label=label,
-                                     progress=progress)
+    fetched = fetch_live_classes(client, year, term, label=label,
+                                 progress=progress)
 
     updated = 0
     for c in fetched:
