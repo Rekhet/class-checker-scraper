@@ -45,17 +45,12 @@ TERM_CODES = {
 }
 
 
-def export_trend(conn, t) -> dict | None:
-    """Compact enrollment time-series for one term: a shared `ts` axis plus per-class
-    aligned arrays (a=applied, c=cart, e=enrolled, q=quota; null for gaps). Returns
-    None when the term has no samples yet. Positional row access works on both backends."""
-    rows = conn.execute(
-        "SELECT sbjt_cd, lt_no, ts, applied, cart, enrolled, quota "
-        "FROM count_samples WHERE year=? AND term=? ORDER BY ts",
-        (t["year"], t["term"])).fetchall()
-    if not rows:
-        return None
-    ts_keep = sorted({r[2] for r in rows})[-TREND_WINDOW:]
+def _trend_payload(rows, ts_keep: list[str]) -> dict:
+    """Shared ts axis + per-class aligned arrays for one window of samples.
+
+    `updated` is the last sample time (= the real data refresh moment); using
+    export-time now() would change the file on every export even outside the
+    collection windows."""
     idx = {ts: i for i, ts in enumerate(ts_keep)}
     n = len(ts_keep)
     series: dict[str, dict] = {}
@@ -69,8 +64,53 @@ def export_trend(conn, t) -> dict | None:
             s = series[k] = {"a": [None] * n, "c": [None] * n,
                              "e": [None] * n, "q": [None] * n}
         s["a"][i], s["c"][i], s["e"][i], s["q"][i] = r[3], r[4], r[5], r[6]
-    out = {"updated": ts_keep[-1],   # 마지막 샘플 시각(= 실제 데이터 갱신 시점). export 시각(now)을 쓰면 수집창 밖에서도 trend 파일이 매 export마다 바뀜
-           "ts": ts_keep, "series": series}
+    return {"updated": ts_keep[-1], "ts": ts_keep, "series": series}
+
+
+def export_trend_archives(conn, t, out_dir: Path,
+                          window: int = TREND_WINDOW) -> int:
+    """Freeze the trend history that scrolled out of the live window.
+
+    The live trend file publishes only the newest `window` timestamps, so at a
+    10-minute cadence it covers barely two days; everything older is split
+    into fixed `window`-sized chunks (trend_<year>_<term>_w000.json, …) that
+    the web UI can page through. A chunk is written once and then never
+    rewritten — its file existing means it is frozen — so the hourly publish
+    does not churn git history. The trailing partial chunk stays live-only.
+    Returns the number of complete chunks (written or already present)."""
+    rows = conn.execute(
+        "SELECT sbjt_cd, lt_no, ts, applied, cart, enrolled, quota "
+        "FROM count_samples WHERE year=? AND term=? ORDER BY ts",
+        (t["year"], t["term"])).fetchall()
+    if not rows:
+        return 0
+    all_ts = sorted({r[2] for r in rows})
+    complete = len(all_ts) // window
+    if not complete:
+        return 0
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for w in range(complete):
+        path = out_dir / f"trend_{t['year']}_{t['term']}_w{w:03d}.json"
+        if path.exists():
+            continue
+        keep = all_ts[w * window:(w + 1) * window]
+        keepset = set(keep)
+        _write(path, _trend_payload([r for r in rows if r[2] in keepset], keep))
+    return complete
+
+
+def export_trend(conn, t) -> dict | None:
+    """Compact enrollment time-series for one term: a shared `ts` axis plus per-class
+    aligned arrays (a=applied, c=cart, e=enrolled, q=quota; null for gaps). Returns
+    None when the term has no samples yet. Positional row access works on both backends."""
+    rows = conn.execute(
+        "SELECT sbjt_cd, lt_no, ts, applied, cart, enrolled, quota "
+        "FROM count_samples WHERE year=? AND term=? ORDER BY ts",
+        (t["year"], t["term"])).fetchall()
+    if not rows:
+        return None
+    ts_keep = sorted({r[2] for r in rows})[-TREND_WINDOW:]
+    out = _trend_payload(rows, ts_keep)
     st = conn.execute("SELECT closed, forced_at FROM count_state WHERE year=? AND term=?",
                       (t["year"], t["term"])).fetchone()
     if st and st[0]:                       # 마감된 학기 (forced past-term capture)
@@ -524,8 +564,10 @@ def export_trend_only(conn, *, years: list[str] | None = None,
                 f"class index has no entry for {t['year']}/{t['term']}; run a full JSON export"
             )
         entry["trend"] = tfn
+        entry["trendArchives"] = export_trend_archives(conn, t, trend_dir)
         written += 1
-        print(f"  {tfn}: {len(trend['series'])} classes × {len(trend['ts'])} samples")
+        print(f"  {tfn}: {len(trend['series'])} classes × {len(trend['ts'])} samples"
+              f" (+{entry['trendArchives']} archive windows)")
     _write(index_path, index)
     return written
 
@@ -571,7 +613,9 @@ def main(argv: list[str] | None = None) -> None:
                 tfn = f"trend_{t['year']}_{t['term']}.json"
                 tsize = _write(trend_dir / tfn, trend)
                 entry["trend"] = tfn   # client prefixes data/trend/
-                print(f"  {tfn}: {len(trend['series'])} classes × {len(trend['ts'])} samples ({tsize // 1024} KB)")
+                entry["trendArchives"] = export_trend_archives(conn, t, trend_dir)
+                print(f"  {tfn}: {len(trend['series'])} classes × {len(trend['ts'])} samples ({tsize // 1024} KB,"
+                      f" +{entry['trendArchives']} archive windows)")
             index_terms.append(entry)
             total += len(rows)
             print(f"  {fn}: {len(rows)} classes ({size // 1024} KB)")
