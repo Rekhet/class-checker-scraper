@@ -71,6 +71,33 @@ class UpdateCountsTests(unittest.TestCase):
         self.assertEqual(row["cancel_vacancy"], 1)
 
 
+class RefreshCountsWiringTests(unittest.TestCase):
+    def test_refresh_counts_passes_flag_from_parse_to_update(self) -> None:
+        """The live-pass update loop must forward cancel_vacancy — a dropped
+        kwarg here silently records NULL for every class."""
+        from unittest import mock
+
+        from scraper import crawl
+
+        fetched = [{"shtm_fg": "U1", "deta_shtm_fg": "U2", "sbjt_cd": "M1",
+                    "lt_no": "001", "subh_cd": "000", "name": "c",
+                    "applied": 29, "quota": 30, "enrolled": 30,
+                    "cancel_vacancy": 1}]
+        conn = type("C", (), {"commit": lambda self: None})()
+        seen = {}
+
+        def fake_update(conn_, *key, **kwargs):
+            seen.update(kwargs)
+            return True
+
+        with mock.patch.object(crawl, "fetch_live_classes", return_value=fetched), \
+             mock.patch.object(crawl.db, "update_counts", side_effect=fake_update):
+            crawl.refresh_counts(conn, object(), "2026", "T1",
+                                 collect_cart=False, collect_enrollment=True)
+
+        self.assertEqual(seen.get("cancel_vacancy"), 1)
+
+
 class SampleCountsTests(unittest.TestCase):
     def test_samples_carry_cancel_vacancy_during_enrollment(self) -> None:
         raw = _conn()

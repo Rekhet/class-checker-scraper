@@ -360,7 +360,8 @@ def refresh_counts(conn, client: SnuClient, year: str, term: str, *,
             kwargs["cart"] = c.get("cart")
         if collect_enrollment:
             kwargs.update(applied=c.get("applied"), quota=c.get("quota"),
-                          enrolled=c.get("enrolled"))
+                          enrolled=c.get("enrolled"),
+                          cancel_vacancy=c.get("cancel_vacancy"))
         if db.update_counts(
             conn, year, c["shtm_fg"], c["deta_shtm_fg"], c["sbjt_cd"],
             c["lt_no"], c["subh_cd"], name=c.get("name"),
