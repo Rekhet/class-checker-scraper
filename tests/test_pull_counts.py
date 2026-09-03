@@ -16,7 +16,8 @@ CREATE TABLE count_samples (
     applied  INTEGER,
     cart     INTEGER,
     enrolled INTEGER,
-    quota    INTEGER
+    quota    INTEGER,
+    cancel_vacancy INTEGER
 )
 """
 
@@ -25,15 +26,15 @@ def _db(rows=()):
     conn = sqlite3.connect(":memory:")
     conn.execute(SCHEMA)
     conn.executemany(
-        "INSERT INTO count_samples VALUES (?,?,?,?,?,?,?,?,?)", rows
+        "INSERT INTO count_samples VALUES (?,?,?,?,?,?,?,?,?,?)", rows
     )
     conn.commit()
     return conn
 
 
-ROW_A = ("2026", "T1", "M100", "001", "2026-09-01T09:00:00", 5, None, None, 30)
-ROW_B = ("2026", "T1", "M100", "001", "2026-09-01T09:10:00", 6, None, None, 30)
-ROW_C = ("2026", "T1", "M200", "002", "2026-09-01T09:10:00", 9, None, None, 40)
+ROW_A = ("2026", "T1", "M100", "001", "2026-09-01T09:00:00", 5, None, None, 30, 0)
+ROW_B = ("2026", "T1", "M100", "001", "2026-09-01T09:10:00", 6, None, None, 30, 1)
+ROW_C = ("2026", "T1", "M200", "002", "2026-09-01T09:10:00", 9, None, None, 40, None)
 
 
 class MergeSamplesTests(unittest.TestCase):

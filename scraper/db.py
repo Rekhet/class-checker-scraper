@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS classes (
     status         TEXT,                -- 개설상태: '설강' / '폐강대상'
     grading        TEXT,                -- 평가방식 (성적부여형태): 'A~F' / 'S/U' / 'S+/S/U'; NULL=미수집
     grading_switch TEXT,                -- 평가방식 전환가능여부: 'Y' / 'N'; NULL=미수집
+    cancel_vacancy INTEGER,             -- 취소여석 배지: 1/0; NULL=미수집 (지정 시간대 신청 대상)
     UNIQUE(year, shtm_fg, deta_shtm_fg, sbjt_cd, lt_no, subh_cd)
 );
 
@@ -85,7 +86,8 @@ CREATE TABLE IF NOT EXISTS count_samples (
     applied  INTEGER,
     cart     INTEGER,
     enrolled INTEGER,
-    quota    INTEGER
+    quota    INTEGER,
+    cancel_vacancy INTEGER              -- 취소여석 배지 at sample time (1/0; NULL=미수집)
 );
 
 -- Per-term collection status. A forced (past-semester) update sets closed=1, so
@@ -287,6 +289,11 @@ def init_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE classes ADD COLUMN grading TEXT")
     if ccols and "grading_switch" not in ccols:
         conn.execute("ALTER TABLE classes ADD COLUMN grading_switch TEXT")
+    if ccols and "cancel_vacancy" not in ccols:
+        conn.execute("ALTER TABLE classes ADD COLUMN cancel_vacancy INTEGER")
+    scols = [r[1] for r in conn.execute("PRAGMA table_info(count_samples)").fetchall()]
+    if scols and "cancel_vacancy" not in scols:
+        conn.execute("ALTER TABLE count_samples ADD COLUMN cancel_vacancy INTEGER")
     # migrate old single-PK terms (term-only) -> composite (year, term) so the
     # same code can coexist across years. Backfill labels from existing classes.
     pk = [r[1] for r in conn.execute("PRAGMA table_info(terms)").fetchall() if r[5]]
@@ -474,7 +481,8 @@ def update_counts(conn: sqlite3.Connection, year: str, shtm_fg: str,
                   name: str | None = None, professor: str | None = None,
                   department: str | None = None, applied: int | None = None,
                   quota: int | None = None, enrolled: int | None = None,
-                  cart: int | None = None) -> bool:
+                  cart: int | None = None,
+                  cancel_vacancy: int | None = None) -> bool:
     """Overlay live enrollment numbers onto the resolved catalog row.
 
     Only volatile columns move; a None leaves the old value (COALESCE), and a
@@ -491,8 +499,9 @@ def update_counts(conn: sqlite3.Connection, year: str, shtm_fg: str,
     cur = conn.execute(
         "UPDATE classes SET applied=COALESCE(?, applied), "
         "quota=COALESCE(?, quota), enrolled=COALESCE(?, enrolled), "
-        "cart=COALESCE(?, cart) WHERE id=?",
-        (applied, quota, enrolled, cart, class_id),
+        "cart=COALESCE(?, cart), "
+        "cancel_vacancy=COALESCE(?, cancel_vacancy) WHERE id=?",
+        (applied, quota, enrolled, cart, cancel_vacancy, class_id),
     )
     return cur.rowcount > 0
 
@@ -620,17 +629,20 @@ def sample_counts(conn: sqlite3.Connection, year_terms, ts: str | None = None,
     n = 0
     for year, term in year_terms:
         rows = conn.execute(
-            "SELECT year, term, sbjt_cd, lt_no, applied, cart, enrolled, quota "
-            "FROM classes WHERE year=? AND term=?", (year, term)).fetchall()
+            "SELECT year, term, sbjt_cd, lt_no, applied, cart, enrolled, quota, "
+            "cancel_vacancy FROM classes WHERE year=? AND term=?",
+            (year, term)).fetchall()
         insert_chunked(
             conn, "count_samples",
             ["year", "term", "sbjt_cd", "lt_no", "ts",
-             "applied", "cart", "enrolled", "quota"],
+             "applied", "cart", "enrolled", "quota", "cancel_vacancy"],
             [(r["year"], r["term"], r["sbjt_cd"], r["lt_no"], ts,
               r["applied"] if collect_applied else None,
               r["cart"] if collect_cart else None,
               r["enrolled"] if collect_enrolled else None,
-              r["quota"]) for r in rows])
+              r["quota"],
+              r["cancel_vacancy"] if collect_enrolled else None)
+             for r in rows])
         n += len(rows)
     if keep_days:
         cutoff = (_collection_now() - timedelta(days=keep_days)).isoformat(timespec="seconds")

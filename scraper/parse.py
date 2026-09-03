@@ -56,6 +56,10 @@ class ClassRecord:
     applied: int | None = None
     enrolled: int | None = None
     cart: int | None = None       # 장바구니신청 인원 (volatile; from search results)
+    # 취소여석 badge: 1 = the class has cancellation vacancies (was full, seats
+    # freed by drops; claimable only in the announced time slots), 0 = badge
+    # absent, None = the page carried no state block (old fixtures/HTML).
+    cancel_vacancy: int | None = None
     slots: list[TimeSlot] = field(default_factory=list)
     time_blocks: list[dict] = field(default_factory=list)  # exact day/start/end
 
@@ -160,6 +164,9 @@ def _parse_item(item, slot: TimeSlot, year, shtm, deta) -> ClassRecord:
     cart = item.select_one("span.carts")
     if cart:
         rec.cart = _int_or_none(cart.get_text(" ", strip=True))
+    state = item.select_one("li.state")
+    if state is not None:
+        rec.cancel_vacancy = 1 if "취소여석" in state.get_text() else 0
     rec.time_blocks = slots.parse_blocks(item.get_text(" "))
     return rec
 

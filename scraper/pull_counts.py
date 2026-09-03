@@ -25,7 +25,7 @@ DEFAULT_DEST = PROJECT_ROOT / "data" / "turso.db"
 STATE_PATH = PROJECT_ROOT / "data" / "pull_counts.state"
 
 COLUMNS = ("year", "term", "sbjt_cd", "lt_no", "ts",
-           "applied", "cart", "enrolled", "quota")
+           "applied", "cart", "enrolled", "quota", "cancel_vacancy")
 _COLS = ", ".join(COLUMNS)
 _INSERT = (
     f"INSERT INTO count_samples ({_COLS}) "

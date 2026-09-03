@@ -71,13 +71,13 @@ def bootstrap_local(remote, local, *, year: str, term: str) -> dict:
 def push_samples(local, remote) -> dict:
     """Append every scratch-DB count sample to the cloud in batched INSERTs."""
     rows = local.execute(
-        "SELECT year, term, sbjt_cd, lt_no, ts, applied, cart, enrolled, quota"
-        " FROM count_samples"
+        "SELECT year, term, sbjt_cd, lt_no, ts, applied, cart, enrolled, quota,"
+        " cancel_vacancy FROM count_samples"
     ).fetchall()
     db.insert_chunked(
         remote, "count_samples",
         ["year", "term", "sbjt_cd", "lt_no", "ts",
-         "applied", "cart", "enrolled", "quota"],
+         "applied", "cart", "enrolled", "quota", "cancel_vacancy"],
         [tuple(r) for r in rows],
     )
     remote.commit()
