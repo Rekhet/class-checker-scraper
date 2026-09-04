@@ -41,6 +41,12 @@ Consequences every change must respect:
 - **Schema changes must migrate BOTH databases** — the local catalog
   (`data/turso.db`, via `db.init_schema`) and the cloud Turso database
   (ALTER it before pushing code that writes the new column).
+- **Counts are stored as deltas** (`count_samples` = changes only,
+  `count_passes` = the time axis, `count_latest` = the current value per
+  class). Writing every class every pass exhausted the cloud plan's write
+  quota mid-semester on 2026-09-04 and stopped collection; do not restore
+  dense writes, and do not prune old samples — a deleted row is the baseline
+  a later delta is relative to.
 - **Verify a collector change against an actual runner pass** (the next
   cron run's samples in the cloud DB), not only against a local run.
 - **Only `count_samples` crosses the cloud boundary.** Catalog facts (new,

@@ -40,6 +40,11 @@ def _add_sample(conn, sbjt_cd, lt_no, ts, **cols):
         " cart, enrolled, quota, cancel_vacancy) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (YEAR, TERM, sbjt_cd, lt_no, ts, values["applied"], values["cart"],
          values["enrolled"], values["quota"], values["cancel_vacancy"]))
+    db.record_pass(conn, YEAR, TERM, ts, applied=True, cart=True, enrolled=True)
+    conn.commit()
+    # count_latest is derived state: fold the new delta in, exactly as the
+    # puller does after merging rows collected elsewhere.
+    db.fold_pass_into_latest(conn, ts)
     conn.commit()
 
 

@@ -9,10 +9,17 @@ pays a network round trip. Instead each run:
 1. bootstraps a LOCAL scratch libsql file from the cloud catalog (one short
    remote connection, a couple of SELECTs),
 2. runs the ordinary windowed counts pass against that local file, and
-3. pushes the run's count_samples back to the cloud in batched INSERTs over a
-   second short remote connection.
+3. pushes the run's count_samples deltas, its count_passes row, and the moved
+   classes' count_latest values back to the cloud over a second short remote
+   connection.
 
-The cloud classes table keeps its seeded counts; only count_samples matters
+Samples are DELTAS: a class is written only when one of its collected numbers
+changed (about 1% of the roster between two 10-minute passes), with
+count_passes carrying the time axis and count_latest the current value each
+pass compares against. Storing every class every pass exhausted the database's
+write quota mid-semester on 2026-09-04.
+
+The cloud classes table keeps its seeded counts; only the counts tables matter
 for the 인원 추이 trend, and the local machine's own refresh keeps the local
 catalog current. Usage (TURSO_DATABASE_URL/TURSO_AUTH_TOKEN in the env):
 
@@ -55,13 +62,27 @@ def _copy_query(remote, local, table: str, where: str = "", params=()) -> int:
     return len(rows)
 
 
+SAMPLE_COLS = ["year", "term", "sbjt_cd", "lt_no", "ts",
+               "applied", "cart", "enrolled", "quota", "cancel_vacancy"]
+PASS_COLS = ["year", "term", "ts", "applied", "cart", "enrolled"]
+
+
 def bootstrap_local(remote, local, *, year: str, term: str) -> dict:
-    """Copy the terms list and the scoped classes rows into the scratch DB."""
+    """Copy the terms list, the scoped classes, and the current counts baseline.
+
+    count_latest is what makes a delta pass possible: the collector has to know
+    each class's last recorded numbers to tell which ones actually moved. It is
+    one row per class (like the roster itself), so the read stays flat as the
+    sample history grows.
+    """
     db.init_schema(db._Conn(local, "sqlite") if not hasattr(local, "backend") else local)
     counts = {
         "terms": _copy_query(remote, local, "terms"),
         "classes": _copy_query(
             remote, local, "classes", "year=? AND term=?", (year, term)
+        ),
+        "latest": _copy_query(
+            remote, local, "count_latest", "year=? AND term=?", (year, term)
         ),
     }
     local.commit()
@@ -69,19 +90,33 @@ def bootstrap_local(remote, local, *, year: str, term: str) -> dict:
 
 
 def push_samples(local, remote) -> dict:
-    """Append every scratch-DB count sample to the cloud in batched INSERTs."""
+    """Push this run's deltas, its pass rows, and the moved classes' new values.
+
+    Only classes whose numbers changed produce a sample, so a pass writes about
+    1% of the roster instead of all of it; the count_passes row keeps the trend
+    axis complete even when nothing moved at all.
+    """
     rows = local.execute(
+        f"SELECT {', '.join(SAMPLE_COLS)} FROM count_samples").fetchall()
+    passes = local.execute(
+        f"SELECT {', '.join(PASS_COLS)} FROM count_passes").fetchall()
+    latest = local.execute(
         "SELECT year, term, sbjt_cd, lt_no, ts, applied, cart, enrolled, quota,"
-        " cancel_vacancy FROM count_samples"
-    ).fetchall()
+        " cancel_vacancy FROM count_latest WHERE ts IN "
+        "(SELECT ts FROM count_passes)").fetchall()
+    db.insert_chunked(remote, "count_samples", SAMPLE_COLS,
+                      [tuple(r) for r in rows])
+    for pass_row in passes:
+        remote.execute(
+            f"INSERT OR REPLACE INTO count_passes ({', '.join(PASS_COLS)}) "
+            f"VALUES ({', '.join('?' * len(PASS_COLS))})", tuple(pass_row))
     db.insert_chunked(
-        remote, "count_samples",
+        remote, "count_latest",
         ["year", "term", "sbjt_cd", "lt_no", "ts",
          "applied", "cart", "enrolled", "quota", "cancel_vacancy"],
-        [tuple(r) for r in rows],
-    )
+        [tuple(r) for r in latest], replace=True)
     remote.commit()
-    return {"pushed": len(rows)}
+    return {"pushed": len(rows), "passes": len(passes), "latest": len(latest)}
 
 
 def _remote_connect():

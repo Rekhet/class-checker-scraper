@@ -45,25 +45,93 @@ TERM_CODES = {
 }
 
 
-def _trend_payload(rows, ts_keep: list[str]) -> dict:
-    """Shared ts axis + per-class aligned arrays for one window of samples.
+# Trend metric -> (payload key, count_passes flag column). quota has no flag:
+# every pass records it, so it is simply forward-filled.
+_TREND_METRICS = (("applied", "a", "applied"), ("cart", "c", "cart"),
+                  ("enrolled", "e", "enrolled"), ("quota", "q", None))
+
+
+def _load_axis(conn, t) -> list[tuple]:
+    """The term's collection passes: (ts, applied?, cart?, enrolled?), oldest first.
+
+    count_passes is the axis because samples are deltas — a pass where nothing
+    moved writes no sample at all, yet it is still a point in time the chart
+    must show. A catalog written before delta storage, whose passes were never
+    recorded, falls back to deriving the axis from the dense samples.
+    """
+    rows = conn.execute(
+        "SELECT ts, applied, cart, enrolled FROM count_passes "
+        "WHERE year=? AND term=? ORDER BY ts",
+        (t["year"], t["term"])).fetchall()
+    if rows:
+        return [(r[0], bool(r[1]), bool(r[2]), bool(r[3])) for r in rows]
+    derived = conn.execute(
+        "SELECT ts, MAX(applied IS NOT NULL), MAX(cart IS NOT NULL), "
+        "       MAX(enrolled IS NOT NULL) FROM count_samples "
+        "WHERE year=? AND term=? GROUP BY ts ORDER BY ts",
+        (t["year"], t["term"])).fetchall()
+    return [(r[0], bool(r[1]), bool(r[2]), bool(r[3])) for r in derived]
+
+
+def _walk_samples(conn, t, axis: list[tuple], wanted: dict) -> dict:
+    """Replay the term's samples over `axis`, materialising the wanted windows.
+
+    Samples are deltas: a class's row appears only when one of its collected
+    numbers changed, so the value at any pass is the newest sample at or before
+    it (forward fill). A metric the pass did not collect stays None instead —
+    otherwise a closed 장바구니 window would draw a flat line through the whole
+    수강신청 period. `wanted` maps a window name to a (start, end) half-open
+    slice of `axis`; each becomes its own payload with its own local ts axis.
+    """
+    slots = {name: {ts: i for i, (ts, *_flags) in enumerate(axis[lo:hi])}
+             for name, (lo, hi) in wanted.items()}
+    lengths = {name: hi - lo for name, (lo, hi) in wanted.items()}
+    series = {name: {} for name in wanted}
+    state: dict[str, dict] = {}
+
+    rows = conn.execute(
+        "SELECT sbjt_cd, lt_no, ts, applied, cart, enrolled, quota "
+        "FROM count_samples WHERE year=? AND term=? ORDER BY ts",
+        (t["year"], t["term"])).fetchall()
+    pending = 0
+    for ts, applied_on, cart_on, enrolled_on in axis:
+        while pending < len(rows) and rows[pending][2] <= ts:
+            r = rows[pending]
+            pending += 1
+            cls = f"{r[0]}({r[1]})"
+            if all(value is None for value in r[3:7]):
+                state.pop(cls, None)   # tombstone: the class left the roster
+                continue
+            entry = state.setdefault(cls,
+                                     {"a": None, "c": None, "e": None, "q": None})
+            for value, key in zip(r[3:7], ("a", "c", "e", "q")):
+                if value is not None:
+                    entry[key] = value
+        collected = {"a": applied_on, "c": cart_on, "e": enrolled_on, "q": True}
+        for name, index in slots.items():
+            i = index.get(ts)
+            if i is None:
+                continue
+            n = lengths[name]
+            target = series[name]
+            for cls, entry in state.items():
+                arrays = target.get(cls)
+                if arrays is None:
+                    arrays = target[cls] = {"a": [None] * n, "c": [None] * n,
+                                            "e": [None] * n, "q": [None] * n}
+                for key in ("a", "c", "e", "q"):
+                    if collected[key]:
+                        arrays[key][i] = entry[key]
+    return series
+
+
+def _payload(axis: list[tuple], window: tuple[int, int], series: dict) -> dict:
+    """Wrap one window's series with its ts axis.
 
     `updated` is the last sample time (= the real data refresh moment); using
     export-time now() would change the file on every export even outside the
     collection windows."""
-    idx = {ts: i for i, ts in enumerate(ts_keep)}
-    n = len(ts_keep)
-    series: dict[str, dict] = {}
-    for r in rows:
-        i = idx.get(r[2])
-        if i is None:
-            continue
-        k = f"{r[0]}({r[1]})"
-        s = series.get(k)
-        if s is None:
-            s = series[k] = {"a": [None] * n, "c": [None] * n,
-                             "e": [None] * n, "q": [None] * n}
-        s["a"][i], s["c"][i], s["e"][i], s["q"][i] = r[3], r[4], r[5], r[6]
+    ts_keep = [ts for ts, *_flags in axis[window[0]:window[1]]]
     return {"updated": ts_keep[-1], "ts": ts_keep, "series": series}
 
 
@@ -78,39 +146,34 @@ def export_trend_archives(conn, t, out_dir: Path,
     rewritten — its file existing means it is frozen — so the hourly publish
     does not churn git history. The trailing partial chunk stays live-only.
     Returns the number of complete chunks (written or already present)."""
-    rows = conn.execute(
-        "SELECT sbjt_cd, lt_no, ts, applied, cart, enrolled, quota "
-        "FROM count_samples WHERE year=? AND term=? ORDER BY ts",
-        (t["year"], t["term"])).fetchall()
-    if not rows:
-        return 0
-    all_ts = sorted({r[2] for r in rows})
-    complete = len(all_ts) // window
+    axis = _load_axis(conn, t)
+    complete = len(axis) // window
     if not complete:
         return 0
     out_dir.mkdir(parents=True, exist_ok=True)
+    paths = {}
     for w in range(complete):
         path = out_dir / f"trend_{t['year']}_{t['term']}_w{w:03d}.json"
-        if path.exists():
-            continue
-        keep = all_ts[w * window:(w + 1) * window]
-        keepset = set(keep)
-        _write(path, _trend_payload([r for r in rows if r[2] in keepset], keep))
+        if not path.exists():
+            paths[f"w{w:03d}"] = (path, (w * window, (w + 1) * window))
+    if paths:
+        series = _walk_samples(conn, t, axis,
+                               {name: bounds for name, (_p, bounds) in paths.items()})
+        for name, (path, bounds) in paths.items():
+            _write(path, _payload(axis, bounds, series[name]))
     return complete
 
 
 def export_trend(conn, t) -> dict | None:
     """Compact enrollment time-series for one term: a shared `ts` axis plus per-class
-    aligned arrays (a=applied, c=cart, e=enrolled, q=quota; null for gaps). Returns
-    None when the term has no samples yet. Positional row access works on both backends."""
-    rows = conn.execute(
-        "SELECT sbjt_cd, lt_no, ts, applied, cart, enrolled, quota "
-        "FROM count_samples WHERE year=? AND term=? ORDER BY ts",
-        (t["year"], t["term"])).fetchall()
-    if not rows:
+    aligned arrays (a=applied, c=cart, e=enrolled, q=quota; null for a metric the
+    pass did not collect). Returns None when the term has no passes yet."""
+    axis = _load_axis(conn, t)
+    if not axis:
         return None
-    ts_keep = sorted({r[2] for r in rows})[-TREND_WINDOW:]
-    out = _trend_payload(rows, ts_keep)
+    bounds = (max(0, len(axis) - TREND_WINDOW), len(axis))
+    series = _walk_samples(conn, t, axis, {"live": bounds})["live"]
+    out = _payload(axis, bounds, series)
     st = conn.execute("SELECT closed, forced_at FROM count_state WHERE year=? AND term=?",
                       (t["year"], t["term"])).fetchone()
     if st and st[0]:                       # 마감된 학기 (forced past-term capture)

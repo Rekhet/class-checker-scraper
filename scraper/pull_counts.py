@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Pull cloud-collected count samples into the local libsql catalog.
 
-The GitHub Actions collector appends count_samples rows to the cloud Turso
-database; this merges the new rows into the local catalog (data/turso.db) so
-the export/trend pipeline sees them:
+The GitHub Actions collector appends count_samples deltas and one count_passes
+row per collection pass to the cloud Turso database; this merges both into the
+local catalog (data/turso.db) and rebuilds the derived count_latest, so the
+export/trend pipeline sees them:
 
     TURSO_DATABASE_URL=libsql://<db>-<org>.turso.io \\
     TURSO_AUTH_TOKEN=<token> \\
@@ -34,6 +35,27 @@ _INSERT = (
     "WHERE year=? AND term=? AND sbjt_cd=? AND lt_no=? AND ts=?)"
 )
 
+PASS_COLUMNS = ("year", "term", "ts", "applied", "cart", "enrolled")
+_PASS_INSERT = (
+    f"INSERT OR REPLACE INTO count_passes ({', '.join(PASS_COLUMNS)}) "
+    f"VALUES ({', '.join('?' * len(PASS_COLUMNS))})"
+)
+# count_latest is derived, never copied: db.fold_pass_into_latest rebuilds it
+# from the merged deltas, so the two databases cannot disagree about it.
+_FOLD = (
+    "INSERT OR REPLACE INTO count_latest "
+    "(year, term, sbjt_cd, lt_no, ts, applied, cart, enrolled, quota, "
+    " cancel_vacancy) "
+    "SELECT s.year, s.term, s.sbjt_cd, s.lt_no, s.ts, "
+    "       COALESCE(s.applied, l.applied), COALESCE(s.cart, l.cart), "
+    "       COALESCE(s.enrolled, l.enrolled), COALESCE(s.quota, l.quota), "
+    "       COALESCE(s.cancel_vacancy, l.cancel_vacancy) "
+    "FROM count_samples s LEFT JOIN count_latest l "
+    "  ON l.year=s.year AND l.term=s.term AND l.sbjt_cd=s.sbjt_cd "
+    " AND l.lt_no=s.lt_no "
+    "WHERE s.ts=? AND (l.ts IS NULL OR s.ts >= l.ts)"
+)
+
 
 def merge_samples(src, dst, since_ts: str | None = None) -> dict:
     """Copy count_samples rows from src into dst, skipping existing keys.
@@ -47,15 +69,20 @@ def merge_samples(src, dst, since_ts: str | None = None) -> dict:
     seen (or since_ts unchanged when the source tail is empty) — the caller's
     cursor for the next pull.
     """
-    ts_query = "SELECT DISTINCT ts FROM count_samples"
+    # The pass table is the authoritative tail: a pass where nothing moved
+    # writes no samples at all, and its timestamp still belongs on the axis.
+    ts_query = ("SELECT ts FROM count_passes UNION "
+                "SELECT DISTINCT ts FROM count_samples")
     params: tuple = ()
     if since_ts is not None:
-        ts_query += " WHERE ts > ?"
-        params = (since_ts,)
+        ts_query = ("SELECT ts FROM count_passes WHERE ts > ? UNION "
+                    "SELECT DISTINCT ts FROM count_samples WHERE ts > ?")
+        params = (since_ts, since_ts)
     ts_values = sorted(t for (t,) in src.execute(ts_query, params).fetchall())
 
     inserted = 0
     total = 0
+    passes = 0
     max_ts = since_ts
     for ts in ts_values:
         rows = src.execute(
@@ -65,12 +92,20 @@ def merge_samples(src, dst, since_ts: str | None = None) -> dict:
             row = tuple(row)
             cur = dst.execute(_INSERT, row + row[:5])
             inserted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        for pass_row in src.execute(
+                f"SELECT {', '.join(PASS_COLUMNS)} FROM count_passes WHERE ts = ?",
+                (ts,)).fetchall():
+            dst.execute(_PASS_INSERT, tuple(pass_row))
+            passes += 1
+        # Ascending ts, so the forward fill sees each pass in order.
+        dst.execute(_FOLD, (ts,))
         dst.commit()
         total += len(rows)
         if max_ts is None or ts > max_ts:
             max_ts = ts
     dst.commit()
-    return {"inserted": inserted, "rows": total, "max_ts": max_ts}
+    return {"inserted": inserted, "rows": total, "passes": passes,
+            "max_ts": max_ts}
 
 
 def _read_state() -> str | None:
@@ -114,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     out = merge_samples(src, dst, since_ts=since)
     _write_state(out["max_ts"])
     print(f"pulled {out['rows']} rows, inserted {out['inserted']}, "
-          f"cursor {out['max_ts'] or '-'}")
+          f"{out['passes']} passes, cursor {out['max_ts'] or '-'}")
     return 0
 
 

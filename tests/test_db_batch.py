@@ -53,9 +53,10 @@ class SampleCountsBatchingTests(unittest.TestCase):
         self.assertEqual(inserted, 250)
         got = conn.execute("SELECT COUNT(*) FROM count_samples").fetchone()[0]
         self.assertEqual(got, 250)
-        # 250 rows at ~100 rows per statement must land in a handful of
-        # INSERTs, never one per row
-        self.assertLessEqual(conn.insert_statements, 5)
+        # 250 samples + 250 count_latest upserts at ~100 rows per statement,
+        # plus the single count_passes row: a handful of INSERTs, never one
+        # per row
+        self.assertLessEqual(conn.insert_statements, 10)
 
     def test_default_sample_ts_uses_collection_timezone(self) -> None:
         """A runner whose clock is UTC must still stamp samples in the

@@ -73,9 +73,16 @@
      semesters. The HTML search can't do this sweep — it is hard-capped at 10 rows per page.</p>
 
   <h2 id="trend-windows">인원 추이 collection windows</h2>
-  <p>The 인원 추이 (enrolment-trend) chart is a time series: every counts pass appends
-     one <code>count_samples</code> row per class (<code>a</code>=applied 신청,
-     <code>c</code>=cart 장바구니, <code>e</code>=enrolled 수강인원). Sampling is gated by <strong>collection
+  <p>The 인원 추이 (enrolment-trend) chart is a time series: every counts pass
+     records one <code>count_passes</code> row (the axis point, plus which of
+     <code>a</code>=applied 신청, <code>c</code>=cart 장바구니,
+     <code>e</code>=enrolled 수강인원 it collected) and appends a
+     <code>count_samples</code> row only for the classes whose numbers actually
+     moved — about 1% of the roster between two 10-minute passes. The export
+     forward-fills from <code>count_latest</code>, so the published JSON looks
+     exactly as it did when every class was written every pass; see
+     <a href="database.html#t-counts">the schema</a> for why dense rows ran the
+     cloud database out of write quota. Sampling is gated by <strong>collection
      windows</strong> in the project-root <code>collect.env</code> (local runtime
      configuration, sourced by
      <code>refresh.sh</code> and the server launcher) so the series only grows while the numbers actually move —

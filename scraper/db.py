@@ -90,6 +90,38 @@ CREATE TABLE IF NOT EXISTS count_samples (
     cancel_vacancy INTEGER              -- 취소여석 배지 at sample time (1/0; NULL=미수집)
 );
 
+-- One row per collection pass, so the trend's time axis survives delta storage:
+-- a pass where nothing changed writes no samples at all, and the flags record
+-- WHICH metrics that pass looked at (a metric not collected stays a gap in the
+-- chart rather than being forward-filled over).
+CREATE TABLE IF NOT EXISTS count_passes (
+    year     TEXT NOT NULL,
+    term     TEXT NOT NULL,
+    ts       TEXT NOT NULL,
+    applied  INTEGER NOT NULL DEFAULT 0,   -- 1 = 신청 인원 collected this pass
+    cart     INTEGER NOT NULL DEFAULT 0,   -- 1 = 장바구니 collected this pass
+    enrolled INTEGER NOT NULL DEFAULT 0,   -- 1 = 수강 인원 (+취소여석) collected
+    PRIMARY KEY (year, term, ts)
+);
+
+-- Materialised current value per class: the baseline a delta pass compares
+-- against, and what the export/catalog overlay reads. Only classes whose
+-- numbers actually moved are rewritten, so a pass costs ~1% of the roster in
+-- writes instead of the whole thing.
+CREATE TABLE IF NOT EXISTS count_latest (
+    year     TEXT NOT NULL,
+    term     TEXT NOT NULL,
+    sbjt_cd  TEXT NOT NULL,
+    lt_no    TEXT NOT NULL,
+    ts       TEXT NOT NULL,              -- pass that last changed this class
+    applied  INTEGER,
+    cart     INTEGER,
+    enrolled INTEGER,
+    quota    INTEGER,
+    cancel_vacancy INTEGER,
+    PRIMARY KEY (year, term, sbjt_cd, lt_no)
+);
+
 -- Per-term collection status. A forced (past-semester) update sets closed=1, so
 -- the trend export can mark the term 마감 and a re-force can ask before re-running.
 CREATE TABLE IF NOT EXISTS count_state (
@@ -109,6 +141,7 @@ CREATE INDEX IF NOT EXISTS idx_samples_key  ON count_samples(year, term, sbjt_cd
 -- idx_samples_key leads with the class identity, so without this index
 -- every pull full-scans the whole sample table.
 CREATE INDEX IF NOT EXISTS idx_samples_ts   ON count_samples(ts);
+CREATE INDEX IF NOT EXISTS idx_passes_ts    ON count_passes(ts);
 """
 
 
@@ -308,7 +341,80 @@ def init_schema(conn: sqlite3.Connection) -> None:
             "INSERT OR IGNORE INTO terms(term, year, label) "
             f"SELECT DISTINCT term, year, year || ' ' || ({_TERM_LABEL_CASE}) "
             "FROM classes")
+    backfill_delta_tables(conn)
     conn.commit()
+
+
+SAMPLE_METRICS = ("applied", "cart", "enrolled", "quota", "cancel_vacancy")
+
+
+def backfill_delta_tables(conn: sqlite3.Connection) -> dict:
+    """Derive count_passes / count_latest from a pre-delta sample history.
+
+    Samples used to be dense — one row per class per pass — so an existing
+    catalog carries the whole axis and every current value inside
+    count_samples. Reconstruct both tables once, on the first connection that
+    finds them empty; a fresh (cloud) database has nothing to reconstruct and
+    this is a no-op. Historical rows are never rewritten or deleted.
+    """
+    have_samples = conn.execute("SELECT 1 FROM count_samples LIMIT 1").fetchone()
+    if not have_samples:
+        return {"passes": 0, "latest": 0}
+    if conn.execute("SELECT 1 FROM count_passes LIMIT 1").fetchone():
+        return {"passes": 0, "latest": 0}
+
+    conn.execute(
+        "INSERT OR IGNORE INTO count_passes (year, term, ts, applied, cart, enrolled) "
+        "SELECT year, term, ts, MAX(applied IS NOT NULL), MAX(cart IS NOT NULL), "
+        "       MAX(enrolled IS NOT NULL) "
+        "FROM count_samples GROUP BY year, term, ts")
+    passes = conn.execute("SELECT COUNT(*) FROM count_passes").fetchone()[0]
+
+    # Forward-fill per metric in timestamp order: the newest non-NULL value of
+    # each column is the class's current value, which is exactly what a delta
+    # pass compares against.
+    state: dict[tuple, dict] = {}
+    cur = conn.execute(
+        "SELECT year, term, sbjt_cd, lt_no, ts, applied, cart, enrolled, quota, "
+        "cancel_vacancy FROM count_samples ORDER BY ts")
+    for row in cur:
+        key = (row[0], row[1], row[2], row[3])
+        entry = state.setdefault(key, {"ts": row[4]})
+        entry["ts"] = row[4]
+        for i, name in enumerate(SAMPLE_METRICS, start=5):
+            if row[i] is not None:
+                entry[name] = row[i]
+    # In dense history every live class was sampled every pass, so a class
+    # whose newest sample predates its term's newest pass had already left the
+    # roster. Close it at the pass right after it was last seen, otherwise the
+    # forward fill would resurrect it as a flat line to this day.
+    axis: dict[tuple, list] = {}
+    for year, term, ts in conn.execute(
+            "SELECT year, term, ts FROM count_passes ORDER BY ts").fetchall():
+        axis.setdefault((year, term), []).append(ts)
+    tombstones, live = [], {}
+    for key, value in state.items():
+        term_axis = axis.get((key[0], key[1]), [])
+        after = next((ts for ts in term_axis if ts > value["ts"]), None)
+        if after is None:
+            live[key] = value
+        else:
+            tombstones.append((key[0], key[1], key[2], key[3], after,
+                               *(None for _ in SAMPLE_METRICS)))
+    if live:
+        insert_chunked(
+            conn, "count_latest",
+            ["year", "term", "sbjt_cd", "lt_no", "ts", *SAMPLE_METRICS],
+            [(k[0], k[1], k[2], k[3], v["ts"],
+              *(v.get(name) for name in SAMPLE_METRICS))
+             for k, v in live.items()])
+    if tombstones:
+        insert_chunked(
+            conn, "count_samples",
+            ["year", "term", "sbjt_cd", "lt_no", "ts", *SAMPLE_METRICS],
+            tombstones)
+    conn.commit()
+    return {"passes": passes, "latest": len(live), "retired": len(tombstones)}
 
 
 def clear_all(conn: sqlite3.Connection) -> None:
@@ -511,45 +617,39 @@ def update_counts(conn: sqlite3.Connection, year: str, shtm_fg: str,
 
 
 def apply_latest_samples(conn: sqlite3.Connection, year: str, term: str) -> dict:
-    """Overlay the newest collected count sample onto the catalog rows.
+    """Overlay each class's current collected counts onto the catalog rows.
 
     The 10-minute 인원 pass runs on GitHub-hosted runners and lands in
-    count_samples only (scraper/pull_counts.py merges it into the local
+    count_samples/count_latest (scraper/pull_counts.py merges it into the local
     catalog). The static export reads the volatile columns off `classes`, so
     without this overlay the published search rows would freeze at the last
     local crawl while the trend kept moving.
 
-    Same COALESCE semantics as `update_counts`: a NULL sample column (a metric
-    outside its collection window) leaves the stored value alone, a real value
-    including 0 overrides it. Classes with no sample at that timestamp keep
-    their previous numbers. Returns {"ts": <sample ts or None>, "updated": n}.
+    Reads count_latest, which is already forward-filled per metric, so a class
+    that has not moved for days still gets its real numbers. NULL leaves the
+    stored value alone, the same COALESCE semantics as `update_counts`.
+    Returns {"ts": <newest pass in the overlay or None>, "updated": n}.
     """
     ts = conn.execute(
-        "SELECT MAX(ts) FROM count_samples WHERE year=? AND term=?",
+        "SELECT MAX(ts) FROM count_latest WHERE year=? AND term=?",
         (year, term)).fetchone()[0]
     if ts is None:
         return {"ts": None, "updated": 0}
-    ids = {(r["sbjt_cd"], r["lt_no"]): r["id"] for r in conn.execute(
-        "SELECT id, sbjt_cd, lt_no FROM classes WHERE year=? AND term=?",
-        (year, term)).fetchall()}
-    params = []
-    for r in conn.execute(
-            "SELECT sbjt_cd, lt_no, applied, cart, enrolled, quota, cancel_vacancy "
-            "FROM count_samples WHERE year=? AND term=? AND ts=?",
-            (year, term, ts)).fetchall():
-        class_id = ids.get((r["sbjt_cd"], r["lt_no"]))
-        if class_id is None:       # sampled class no longer in the catalog
-            continue
-        params.append((r["applied"], r["cart"], r["enrolled"], r["quota"],
-                       r["cancel_vacancy"], class_id))
-    if params:
-        conn.executemany(
-            "UPDATE classes SET applied=COALESCE(?, applied), "
-            "cart=COALESCE(?, cart), enrolled=COALESCE(?, enrolled), "
-            "quota=COALESCE(?, quota), "
-            "cancel_vacancy=COALESCE(?, cancel_vacancy) WHERE id=?", params)
-        conn.commit()
-    return {"ts": ts, "updated": len(params)}
+    # One UPDATE ... FROM rather than a statement per class: on a libSQL
+    # connection every statement is a round trip, and the roster is ~8,600 rows.
+    cur = conn.execute(
+        "UPDATE classes SET applied=COALESCE(l.applied, classes.applied), "
+        "cart=COALESCE(l.cart, classes.cart), "
+        "enrolled=COALESCE(l.enrolled, classes.enrolled), "
+        "quota=COALESCE(l.quota, classes.quota), "
+        "cancel_vacancy=COALESCE(l.cancel_vacancy, classes.cancel_vacancy) "
+        "FROM count_latest l "
+        "WHERE l.year=classes.year AND l.term=classes.term "
+        "  AND l.sbjt_cd=classes.sbjt_cd AND l.lt_no=classes.lt_no "
+        "  AND classes.year=? AND classes.term=?", (year, term))
+    updated = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    conn.commit()
+    return {"ts": ts, "updated": updated}
 
 
 def snapshot_cart_counts(conn: sqlite3.Connection, year_terms) -> dict[tuple, int]:
@@ -612,13 +712,16 @@ def apply_grading(conn: sqlite3.Connection, year: str, term: str,
 _MAX_PARAMS_PER_STATEMENT = 900
 
 
-def insert_chunked(conn, table: str, cols, rows, *, chunk_rows: int | None = None) -> int:
+def insert_chunked(conn, table: str, cols, rows, *, chunk_rows: int | None = None,
+                   replace: bool = False) -> int:
     """Insert rows with multi-VALUES statements; returns statements executed.
 
     A remote libSQL connection pays one network round trip per execute(), so
     row-at-a-time executemany makes a large insert take minutes to hours.
     Packing many rows into each INSERT keeps the round-trip count proportional
-    to row_count / chunk_rows instead.
+    to row_count / chunk_rows instead. ``replace=True`` upserts on the target's
+    primary key (count_latest), which is how a delta pass rewrites only the
+    classes whose numbers moved.
     """
     rows = list(rows)
     if not rows:
@@ -626,7 +729,8 @@ def insert_chunked(conn, table: str, cols, rows, *, chunk_rows: int | None = Non
     if chunk_rows is None:
         chunk_rows = max(1, _MAX_PARAMS_PER_STATEMENT // len(cols))
     one = "(" + ",".join("?" * len(cols)) + ")"
-    prefix = f"INSERT INTO {table} ({','.join(cols)}) VALUES "
+    verb = "INSERT OR REPLACE INTO" if replace else "INSERT INTO"
+    prefix = f"{verb} {table} ({','.join(cols)}) VALUES "
     statements = 0
     for i in range(0, len(rows), chunk_rows):
         chunk = rows[i:i + chunk_rows]
@@ -653,48 +757,146 @@ def _collection_now():
 
 
 def sample_counts(conn: sqlite3.Connection, year_terms, ts: str | None = None,
-                  keep_days: int = 120, collect_cart: bool = True,
+                  keep_days: int | None = None, collect_cart: bool = True,
                   collect_enrolled: bool = True,
                   collect_applied: bool = True) -> int:
-    """Append one enrollment sample per class (for the given (year, term) scope)
-    to count_samples, stamped `ts`. Reads the current classes table, so call it
-    right AFTER a counts refresh. Returns rows inserted. Old rows beyond
-    keep_days are pruned to bound the table.
+    """Record one collection pass for the given (year, term) scope, stamped `ts`.
+
+    Reads the current classes table, so call it right AFTER a counts refresh.
+    Every pass writes one count_passes row (the trend's time axis, plus which
+    metrics this pass looked at); count_samples receives a row only for the
+    classes whose collected numbers actually CHANGED against count_latest,
+    which is then updated for exactly those classes. Roughly 1% of a roster
+    moves between two 10-minute passes, so this is ~100x less data than storing
+    every class every pass — the difference between fitting a semester in a
+    small database and running out of write quota mid-term. Returns the number
+    of sample rows written.
 
     collect_cart / collect_enrolled gate those two metrics: outside their
     collection window the caller passes False and the column is stored as NULL
     (장바구니 only matters during the cart period, 수강 인원 during 수강신청).
     ``collect_applied=False`` is used by the cart-only sampler so an applied
     count from the same live response cannot be mistaken for a cart sample.
-    When BOTH are False (outside every window) nothing is inserted at all, so the
-    인원 추이 trend stays frozen off-season instead of accruing flat samples."""
-    from datetime import datetime, timedelta
+    When BOTH are False (outside every window) nothing is recorded at all, not
+    even a pass, so the 인원 추이 trend stays frozen off-season.
+
+    `keep_days` is accepted for compatibility and ignored: deleting old rows
+    would erase the baseline that later samples are deltas against, and the
+    history is the product here.
+    """
     ts = ts or _collection_now().isoformat(timespec="seconds")
     if not collect_cart and not collect_enrolled:
         return 0   # outside every collection window: record nothing (인원 추이 frozen)
-    n = 0
+    written = 0
     for year, term in year_terms:
         rows = conn.execute(
-            "SELECT year, term, sbjt_cd, lt_no, applied, cart, enrolled, quota, "
+            "SELECT sbjt_cd, lt_no, applied, cart, enrolled, quota, "
             "cancel_vacancy FROM classes WHERE year=? AND term=?",
             (year, term)).fetchall()
+        latest = {
+            (r["sbjt_cd"], r["lt_no"]): r
+            for r in conn.execute(
+                "SELECT sbjt_cd, lt_no, applied, cart, enrolled, quota, "
+                "cancel_vacancy FROM count_latest WHERE year=? AND term=?",
+                (year, term)).fetchall()
+        }
+        samples, current = [], []
+        for r in rows:
+            sampled = {
+                "applied": r["applied"] if collect_applied else None,
+                "cart": r["cart"] if collect_cart else None,
+                "enrolled": r["enrolled"] if collect_enrolled else None,
+                "quota": r["quota"],
+                "cancel_vacancy": r["cancel_vacancy"] if collect_enrolled else None,
+            }
+            if all(value is None for value in sampled.values()):
+                continue      # nothing observed: an all-NULL row means tombstone
+            previous = latest.get((r["sbjt_cd"], r["lt_no"]))
+            # Compare only what this pass actually looked at: a metric left
+            # NULL because its window is closed must not read as a change, and
+            # must not overwrite the value the metric last had.
+            changed = previous is None or any(
+                value != previous[name]
+                for name, value in sampled.items() if value is not None)
+            if not changed:
+                continue
+            samples.append((year, term, r["sbjt_cd"], r["lt_no"], ts,
+                            *(sampled[name] for name in SAMPLE_METRICS)))
+            merged = {
+                name: (sampled[name] if sampled[name] is not None
+                       else (previous[name] if previous is not None else None))
+                for name in SAMPLE_METRICS
+            }
+            current.append((year, term, r["sbjt_cd"], r["lt_no"], ts,
+                            *(merged[name] for name in SAMPLE_METRICS)))
+        # A class that left the roster stops producing samples, which under
+        # delta storage is indistinguishable from "unchanged" — it would be
+        # forward-filled forever. Close its series with an all-NULL tombstone
+        # (a shape no real sample has: quota is always collected) and drop its
+        # baseline so later passes ignore it.
+        present = {(r["sbjt_cd"], r["lt_no"]) for r in rows}
+        gone = [key for key in latest if key not in present]
+        for sbjt_cd, lt_no in gone:
+            samples.append((year, term, sbjt_cd, lt_no, ts,
+                            *(None for _ in SAMPLE_METRICS)))
+            conn.execute(
+                "DELETE FROM count_latest WHERE year=? AND term=? AND "
+                "sbjt_cd=? AND lt_no=?", (year, term, sbjt_cd, lt_no))
         insert_chunked(
             conn, "count_samples",
-            ["year", "term", "sbjt_cd", "lt_no", "ts",
-             "applied", "cart", "enrolled", "quota", "cancel_vacancy"],
-            [(r["year"], r["term"], r["sbjt_cd"], r["lt_no"], ts,
-              r["applied"] if collect_applied else None,
-              r["cart"] if collect_cart else None,
-              r["enrolled"] if collect_enrolled else None,
-              r["quota"],
-              r["cancel_vacancy"] if collect_enrolled else None)
-             for r in rows])
-        n += len(rows)
-    if keep_days:
-        cutoff = (_collection_now() - timedelta(days=keep_days)).isoformat(timespec="seconds")
-        conn.execute("DELETE FROM count_samples WHERE ts < ?", (cutoff,))
+            ["year", "term", "sbjt_cd", "lt_no", "ts", *SAMPLE_METRICS], samples)
+        insert_chunked(
+            conn, "count_latest",
+            ["year", "term", "sbjt_cd", "lt_no", "ts", *SAMPLE_METRICS], current,
+            replace=True)
+        record_pass(conn, year, term, ts, applied=collect_applied,
+                    cart=collect_cart, enrolled=collect_enrolled)
+        written += len(samples)
     conn.commit()
-    return n
+    return written
+
+
+def record_pass(conn: sqlite3.Connection, year: str, term: str, ts: str, *,
+                applied: bool, cart: bool, enrolled: bool) -> None:
+    """Register one collection pass on the trend's time axis."""
+    conn.execute(
+        "INSERT OR REPLACE INTO count_passes (year, term, ts, applied, cart, "
+        "enrolled) VALUES (?,?,?,?,?,?)",
+        (year, term, ts, int(applied), int(cart), int(enrolled)))
+
+
+def fold_pass_into_latest(conn: sqlite3.Connection, ts: str) -> int:
+    """Apply one pass's samples to count_latest, forward-filling NULL metrics.
+
+    count_latest is derived state, so it is never shipped between databases —
+    the puller merges deltas and then rebuilds the current value here. Call it
+    with passes in ascending ts order; an out-of-order (older) delta is ignored
+    rather than allowed to undo newer state.
+    """
+    cur = conn.execute(
+        "INSERT OR REPLACE INTO count_latest "
+        "(year, term, sbjt_cd, lt_no, ts, applied, cart, enrolled, quota, "
+        " cancel_vacancy) "
+        "SELECT s.year, s.term, s.sbjt_cd, s.lt_no, s.ts, "
+        "       COALESCE(s.applied, l.applied), COALESCE(s.cart, l.cart), "
+        "       COALESCE(s.enrolled, l.enrolled), COALESCE(s.quota, l.quota), "
+        "       COALESCE(s.cancel_vacancy, l.cancel_vacancy) "
+        "FROM count_samples s LEFT JOIN count_latest l "
+        "  ON l.year=s.year AND l.term=s.term AND l.sbjt_cd=s.sbjt_cd "
+        " AND l.lt_no=s.lt_no "
+        "WHERE s.ts=? AND (l.ts IS NULL OR s.ts >= l.ts) "
+        "  AND NOT (s.applied IS NULL AND s.cart IS NULL AND s.enrolled IS NULL "
+        "           AND s.quota IS NULL AND s.cancel_vacancy IS NULL)", (ts,))
+    folded = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    # Tombstones (all metrics NULL) retire a class instead of updating it.
+    conn.execute(
+        "DELETE FROM count_latest WHERE EXISTS ("
+        "  SELECT 1 FROM count_samples s WHERE s.ts=? "
+        "   AND s.year=count_latest.year AND s.term=count_latest.term "
+        "   AND s.sbjt_cd=count_latest.sbjt_cd AND s.lt_no=count_latest.lt_no "
+        "   AND s.applied IS NULL AND s.cart IS NULL AND s.enrolled IS NULL "
+        "   AND s.quota IS NULL AND s.cancel_vacancy IS NULL)", (ts,))
+    return folded
 
 
 def mark_closed(conn: sqlite3.Connection, year: str, term: str, ts: str | None = None) -> None:

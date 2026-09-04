@@ -21,7 +21,12 @@ from contextlib import nullcontext
 import db
 import process_lock
 
-COPY_ORDER = ["terms", "classes", "class_slots", "crawl_runs"]   # FK-safe insert
+COPY_ORDER = ["terms", "classes", "class_slots", "crawl_runs",
+              "count_latest"]   # FK-safe insert
+# count_latest is derived state, but seeding it means a freshly created
+# collector database compares its first pass against real numbers instead
+# of writing the whole roster. Sample history is deliberately NOT copied:
+# the export reads it locally, and the cloud only needs the baseline.
 
 _insert_chunked = db.insert_chunked
 

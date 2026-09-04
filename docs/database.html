@@ -88,6 +88,35 @@
     <p>A refresh clears <strong>only the (year, term) catalogs it rebuilds</strong>
        (<code>clear_terms</code>) — refreshing one semester never wipes the others.</p></div>
 
+  <h3 id="t-counts">count_samples, count_passes &amp; count_latest</h3>
+  <p>The 인원 추이 history is stored as <strong>deltas</strong>.
+     <code>count_passes(year, term, ts, applied, cart, enrolled)</code> records
+     one row per collection pass — the chart's time axis, plus which metrics
+     that pass looked at. <code>count_samples</code> receives a row only for the
+     classes whose collected numbers actually changed; roughly 1% of a roster
+     moves between two 10-minute passes.
+     <code>count_latest(year, term, sbjt_cd, lt_no, ts, …)</code> is the
+     materialised current value per class: the baseline a pass compares against
+     and what the catalog overlay reads. All three are keyed by the STABLE class
+     identity (year, term, sbjt_cd, lt_no), not <code>classes.id</code>, so the
+     history survives the wipe+rebuild in <code>refresh_all</code>.</p>
+  <p>A sample row with every metric NULL is a <strong>tombstone</strong>: the
+     class left the roster, so its series stops instead of being forward-filled
+     forever. The export reconstructs each class's value at a pass as the newest
+     sample at or before it, and leaves a metric the pass did not collect as
+     <code>null</code> — a closed 장바구니 window must not draw a flat line
+     through 수강신청.</p>
+  <div class="callout warn"><span class="ic">📉</span>
+    <p>Storing every class every pass wrote ~1.25M rows a day and exhausted the
+       cloud database's monthly write quota mid-semester on 2026-09-04, which
+       stopped collection entirely. Delta storage is what keeps a full semester
+       inside a small database — do not "simplify" it back to dense rows, and do
+       not prune old samples: a deleted row is the baseline some later delta is
+       relative to.</p></div>
+  <p>A catalog written before delta storage is migrated on the first connection:
+     <code>db.backfill_delta_tables()</code> derives the axis and the baseline
+     from the dense history and retires classes that had already vanished.</p>
+
   <h2 id="migrate">Migrating to Turso</h2>
   <p>Source is always the local SQLite file; destination is whatever
      <code>db.connect()</code> resolves from the environment. The copy is idempotent

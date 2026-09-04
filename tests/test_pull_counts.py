@@ -3,30 +3,22 @@ from __future__ import annotations
 import sqlite3
 import unittest
 
+from scraper import db
 from scraper.pull_counts import merge_samples
 
 
-SCHEMA = """
-CREATE TABLE count_samples (
-    year     TEXT NOT NULL,
-    term     TEXT NOT NULL,
-    sbjt_cd  TEXT NOT NULL,
-    lt_no    TEXT NOT NULL,
-    ts       TEXT NOT NULL,
-    applied  INTEGER,
-    cart     INTEGER,
-    enrolled INTEGER,
-    quota    INTEGER,
-    cancel_vacancy INTEGER
-)
-"""
-
-
-def _db(rows=()):
+def _db(rows=(), passes=()):
+    """A real catalog schema: the puller now touches count_samples,
+    count_passes, and the derived count_latest together."""
     conn = sqlite3.connect(":memory:")
-    conn.execute(SCHEMA)
+    conn.row_factory = sqlite3.Row
+    db.init_schema(db._Conn(conn, "sqlite"))
     conn.executemany(
         "INSERT INTO count_samples VALUES (?,?,?,?,?,?,?,?,?,?)", rows
+    )
+    conn.executemany(
+        "INSERT INTO count_passes (year, term, ts, applied, cart, enrolled) "
+        "VALUES (?,?,?,?,?,?)", passes
     )
     conn.commit()
     return conn
@@ -96,6 +88,41 @@ class MergeSamplesTests(unittest.TestCase):
         row_selects = [s for s in selects if "DISTINCT" not in s.upper()]
         self.assertTrue(row_selects)
         self.assertTrue(all("ts = ?" in s or "ts=?" in s for s in row_selects))
+
+    def test_passes_and_derived_latest_come_across(self) -> None:
+        # 09:10 records a pass in which M200 did not move: no sample row, but
+        # the timestamp still belongs on the trend axis, and M200's current
+        # value must survive as the forward-filled count_latest entry.
+        src = _db([ROW_A, ROW_B],
+                  passes=[("2026", "T1", "2026-09-01T09:00:00", 1, 0, 1),
+                          ("2026", "T1", "2026-09-01T09:10:00", 1, 0, 1)])
+        dst = _db()
+
+        result = merge_samples(src, dst)
+
+        self.assertEqual(result["passes"], 2)
+        axis = [t for (t,) in dst.execute(
+            "SELECT ts FROM count_passes ORDER BY ts").fetchall()]
+        self.assertEqual(axis, ["2026-09-01T09:00:00", "2026-09-01T09:10:00"])
+        latest = dst.execute(
+            "SELECT ts, applied, quota, cancel_vacancy FROM count_latest "
+            "WHERE sbjt_cd='M100'").fetchone()
+        self.assertEqual(tuple(latest), ("2026-09-01T09:10:00", 6, 30, 1))
+
+    def test_null_metrics_do_not_erase_the_derived_value(self) -> None:
+        # A pass outside the 장바구니 window stores cart NULL; the last real
+        # 장바구니 number must stay in count_latest rather than be nulled out.
+        src = _db([("2026", "T1", "M100", "001", "2026-08-04T09:00:00",
+                    5, 12, None, 30, None),
+                   ("2026", "T1", "M100", "001", "2026-09-01T09:00:00",
+                    7, None, 7, 30, 0)])
+        dst = _db()
+
+        merge_samples(src, dst)
+
+        latest = dst.execute(
+            "SELECT applied, cart, enrolled FROM count_latest").fetchone()
+        self.assertEqual(tuple(latest), (7, 12, 7))
 
     def test_empty_source_keeps_cursor(self) -> None:
         src = _db()
