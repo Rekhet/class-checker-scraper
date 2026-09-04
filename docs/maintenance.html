@@ -15,9 +15,50 @@
   <p class="lead">Keeping the catalog fresh, recovering fall timing, backups, and the
      handful of failure modes worth recognising.</p>
 
+  <h2 id="hourly">Hourly update: merge, overlay, publish</h2>
+  <p>The hourly <code>class-checker.update.timer</code> does <strong>not</strong>
+     crawl sugang. The 10-minute 인원 pass runs on GitHub-hosted runners
+     (cron-job.org → <code>collect-counts.yml</code> →
+     <code>scraper/cloud_collect.py</code> → cloud Turso), so
+     <code>scripts/update.sh</code> merges those samples
+     (<code>scraper/pull_counts.py</code>), copies the newest sample onto the
+     catalog's volatile columns (<code>python -m scraper.sync_counts</code>),
+     and publishes. The overlay is required: the static export reads
+     applied/cart/enrolled/quota/cancel_vacancy off the <code>classes</code>
+     table, which no longer moves on its own, so search rows would otherwise
+     freeze at the last crawl while the trend kept advancing. A NULL sample
+     column — a metric outside its collection window — leaves the stored value
+     alone.</p>
+  <p>A missing <code>turso-remote.env</code> or a failed pull fails the run:
+     it is the only source of fresh data, and silently republishing yesterday's
+     numbers would hide the outage. <code>class-checker.update.service</code>
+     runs <code>scripts/wait-online.sh</code> as <code>ExecStartPre</code>,
+     because the persistent timer replays a missed activation the moment the
+     machine resumes — seconds before the link is configured, which used to
+     kill the run with <code>ERR_INTERNET_DISCONNECTED</code> and delay
+     publication to the next slot.</p>
+  <p>Because the collector runs off-machine, a stalled schedule produces no
+     local failure at all — the pull returns no rows and the publish is a no-op.
+     <code>scraper/sync_counts.py</code> therefore prints a warning (never an
+     error) when a collection window is open but the newest sample is older
+     than 45 minutes, or 180 minutes in a slow window. Outside every window
+     nothing is expected to arrive, so it stays silent instead of crying wolf
+     off-season.</p>
+  <div class="callout warn"><span class="ic">⚠️</span>
+    <p>Only <code>count_samples</code> crosses the cloud boundary. Without a
+       crawl the catalog is frozen: new, renamed, and 폐강대상 classes,
+       professor, room, language, timing, and 평가방식 stay as the last crawl
+       left them, and a class missing from the cloud roster is never counted
+       there. Run <code>UPDATE_CRAWL=1 ./scripts/update.sh</code> after a
+       timetable change, then re-seed the collector's cloud catalog with
+       <code>scraper/migrate_to_turso.py --src data/turso.db</code> under
+       <code>turso-remote.env</code> if the roster itself changed.</p></div>
+
   <h2 id="cadence">Refresh cadence</h2>
   <p>Two passes, two rhythms — the server does <strong>not</strong> self-schedule; drive
-     these from <code>cron</code>, a timer, or the admin button.</p>
+     these from <code>cron</code>, a timer, or the admin button. The crawling
+     passes below are now manual or bounded-window work; the hourly timer only
+     merges and publishes.</p>
   <div class="table-wrap"><table>
     <tr><th>Pass</th><th>Cost</th><th>Suggested cadence</th></tr>
     <tr><td><strong>Full rebuild</strong> (Excel + timing)</td>
@@ -27,8 +68,11 @@
         <td>Light — one paginated roster/term; commits locally per run</td>
         <td>Often during registration (e.g. every few minutes)</td></tr>
   </table></div>
-  <pre><code><span class="cmt"># existing full update timer (cart excluded)</span>
+  <pre><code><span class="cmt"># hourly merge + publish timer (no crawl)</span>
 systemctl --user enable --now class-checker.update.timer
+
+<span class="cmt"># one-off catalog + 평가방식 crawl, then publish (cart excluded)</span>
+UPDATE_CRAWL=1 ./scripts/update.sh
 
 <span class="cmt"># bounded two-day cart window</span>
 ./scripts/start-cart-window \
@@ -50,8 +94,8 @@ systemctl --user enable --now class-checker.update.timer
   --timezone Asia/Seoul \
   --disable-broad-timer</code></pre>
   <div class="callout note"><span class="ic">⏱️</span>
-    <p>The scheduled full update collects the catalog, enrollment, and grading
-       components, but not cart. The bounded cart worker collects cart during its
+    <p>An <code>UPDATE_CRAWL=1</code> full update collects the catalog,
+       enrollment, and grading components, but not cart. The bounded cart worker collects cart during its
        own window, and the bounded enrollment worker collects live applied/enrolled
        counts on the listed registration days. Both use the same host-local
        <code>data/.crawl.lock</code>, including JSON export and Git publication. The old broad

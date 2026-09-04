@@ -29,7 +29,10 @@ minutes → `.github/workflows/collect-counts.yml` on
 → `scraper/cloud_collect.py` crawls and pushes `count_samples` to the cloud
 Turso database (`turso-remote.env`, untracked, holds the credentials). The
 local hourly `scripts/update.sh` merges those samples back via
-`scraper/pull_counts.py` before exporting.
+`scraper/pull_counts.py`, copies the newest sample onto the catalog's volatile
+columns via `python -m scraper.sync_counts`, and exports. It does **not** crawl
+sugang: the scheduled run is merge + publish only, and `UPDATE_CRAWL=1` is the
+opt-in for a catalog/평가방식 refresh that only a local crawl can collect.
 
 Consequences every change must respect:
 
@@ -40,6 +43,11 @@ Consequences every change must respect:
   (ALTER it before pushing code that writes the new column).
 - **Verify a collector change against an actual runner pass** (the next
   cron run's samples in the cloud DB), not only against a local run.
+- **Only `count_samples` crosses the cloud boundary.** Catalog facts (new,
+  renamed, 폐강대상 classes, professor, room, language, timing, 평가방식) move
+  only when someone runs `UPDATE_CRAWL=1 ./scripts/update.sh` or `make
+  refresh`; a class missing from the cloud roster is never counted there until
+  that roster is re-seeded from the local catalog.
 - A collection failure on the runner fails the Actions run loudly by design
   (retries exhausted or an incomplete roster) and emails the owner; do not
   soften that path.

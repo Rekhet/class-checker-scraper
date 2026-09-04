@@ -105,6 +105,10 @@ CREATE INDEX IF NOT EXISTS idx_classes_prof ON classes(professor);
 CREATE INDEX IF NOT EXISTS idx_classes_dept ON classes(department);
 CREATE INDEX IF NOT EXISTS idx_slots_cell   ON class_slots(day_index, period);
 CREATE INDEX IF NOT EXISTS idx_samples_key  ON count_samples(year, term, sbjt_cd, lt_no, ts);
+-- the cloud->local pull walks the tail by timestamp alone (ts > cursor);
+-- idx_samples_key leads with the class identity, so without this index
+-- every pull full-scans the whole sample table.
+CREATE INDEX IF NOT EXISTS idx_samples_ts   ON count_samples(ts);
 """
 
 
@@ -504,6 +508,48 @@ def update_counts(conn: sqlite3.Connection, year: str, shtm_fg: str,
         (applied, quota, enrolled, cart, cancel_vacancy, class_id),
     )
     return cur.rowcount > 0
+
+
+def apply_latest_samples(conn: sqlite3.Connection, year: str, term: str) -> dict:
+    """Overlay the newest collected count sample onto the catalog rows.
+
+    The 10-minute 인원 pass runs on GitHub-hosted runners and lands in
+    count_samples only (scraper/pull_counts.py merges it into the local
+    catalog). The static export reads the volatile columns off `classes`, so
+    without this overlay the published search rows would freeze at the last
+    local crawl while the trend kept moving.
+
+    Same COALESCE semantics as `update_counts`: a NULL sample column (a metric
+    outside its collection window) leaves the stored value alone, a real value
+    including 0 overrides it. Classes with no sample at that timestamp keep
+    their previous numbers. Returns {"ts": <sample ts or None>, "updated": n}.
+    """
+    ts = conn.execute(
+        "SELECT MAX(ts) FROM count_samples WHERE year=? AND term=?",
+        (year, term)).fetchone()[0]
+    if ts is None:
+        return {"ts": None, "updated": 0}
+    ids = {(r["sbjt_cd"], r["lt_no"]): r["id"] for r in conn.execute(
+        "SELECT id, sbjt_cd, lt_no FROM classes WHERE year=? AND term=?",
+        (year, term)).fetchall()}
+    params = []
+    for r in conn.execute(
+            "SELECT sbjt_cd, lt_no, applied, cart, enrolled, quota, cancel_vacancy "
+            "FROM count_samples WHERE year=? AND term=? AND ts=?",
+            (year, term, ts)).fetchall():
+        class_id = ids.get((r["sbjt_cd"], r["lt_no"]))
+        if class_id is None:       # sampled class no longer in the catalog
+            continue
+        params.append((r["applied"], r["cart"], r["enrolled"], r["quota"],
+                       r["cancel_vacancy"], class_id))
+    if params:
+        conn.executemany(
+            "UPDATE classes SET applied=COALESCE(?, applied), "
+            "cart=COALESCE(?, cart), enrolled=COALESCE(?, enrolled), "
+            "quota=COALESCE(?, quota), "
+            "cancel_vacancy=COALESCE(?, cancel_vacancy) WHERE id=?", params)
+        conn.commit()
+    return {"ts": ts, "updated": len(params)}
 
 
 def snapshot_cart_counts(conn: sqlite3.Connection, year_terms) -> dict[tuple, int]:

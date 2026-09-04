@@ -107,18 +107,24 @@
     <tr><td>선착순수강신청 1–3일차</td><td>08-07, 10, 11</td><td>frozen</td><td><strong>moves</strong></td><td>ENROLL</td></tr>
     <tr><td>수강신청변경 (개강전)</td><td>08-28, 08-31</td><td>frozen</td><td><strong>moves</strong></td><td>ENROLL</td></tr>
     <tr><td>수강신청변경 (개강후/정정) · 정원외</td><td>09-01 ~ 09-09</td><td>frozen</td><td><strong>moves</strong></td><td>ENROLL</td></tr>
-    <tr><td>수강취소 (drip)</td><td>09-08 ~ 10-20</td><td>frozen</td><td>drops</td><td>none <sup>†</sup></td></tr>
+    <tr><td>수강취소 (drip, mySNU)</td><td>09-08 ~ 10-20</td><td>frozen</td><td>drops</td><td>ENROLL_SLOW <sup>†</sup></td></tr>
+    <tr><td>정원외신청 (폐강교과목)</td><td>09-17 ~ 09-22</td><td>frozen</td><td><strong>moves</strong></td><td>ENROLL_SLOW</td></tr>
   </table></div>
-  <p><sup>†</sup> The 수강취소 tail is deliberately <strong>not</strong> collected: 42
-     days of slow drops at hourly sampling would overrun
-     <code>export_json.py</code>'s <code>TREND_WINDOW=240</code> and evict the
-     registration arc. Revisit (bigger cap / slower cadence) if the post-개강 drop-off
-     should show.</p>
+  <p><sup>†</sup> The 수강취소 tail <em>is</em> collected, on the slow cadence:
+     <code>ENROLL_SLOW_WINDOWS</code> samples only the run that lands in the first
+     <code>ENROLL_SLOW_SLOT_MINUTES</code> (default 10) of each hour, so six weeks of
+     drip cost one sample an hour instead of six. The earlier rule excluded the tail
+     because a 240-sample trend window would have evicted the registration arc;
+     archived trend windows (<code>export_trend_archives</code>) now keep that history
+     instead, so nothing has to be dropped. A day that is in both lists is sampled at
+     the fast cadence.</p>
 
   <h3 id="window-config"><code>collect.env</code> mapping</h3>
-<pre><code><span class="cmt"># 2026-2학기 — from sugang co010.action (read 2026-08-06). List item = "DAY" or "START..END".</span>
+<pre><code><span class="cmt"># 2026-2학기 — from the sugang landing page (수강취소 re-read 2026-09-04). List item = "DAY" or "START..END".</span>
 	CART_WINDOWS=2026-08-04..2026-08-05
-ENROLL_WINDOWS=2026-07-30..2026-07-31,2026-08-07,2026-08-10..2026-08-11,2026-08-28..2026-08-31,2026-09-01..2026-09-09</code></pre>
+ENROLL_WINDOWS=2026-07-30..2026-07-31,2026-08-07,2026-08-10..2026-08-11,2026-08-28..2026-08-31,2026-09-01..2026-09-09
+ENROLL_SLOW_WINDOWS=2026-09-08..2026-10-20
+ENROLL_SLOW_SLOT_MINUTES=10</code></pre>
   <div class="callout"><span class="ic">🧩</span>
     <p><code>_in_windows()</code> samples on ANY match, so the configured 담기 span and the
        four enrolment spans are captured while the 확정 days and the ~16-day
@@ -128,7 +134,13 @@ ENROLL_WINDOWS=2026-07-30..2026-07-31,2026-08-07,2026-08-10..2026-08-11,2026-08-
        then every ten minutes through 16:30. If a
        <code>_WINDOWS</code> var is unset the crawler
        falls back to the legacy single <code>CART_START/END</code> +
-       <code>ENROLL_START/END</code> window (behaviour unchanged).</p></div>
+       <code>ENROLL_START/END</code> window (behaviour unchanged). The window
+       arithmetic itself lives in <code>scraper/windows.py</code>, free of the
+       crawler's Playwright import, so the publisher can ask the same question:
+       <code>python -m scraper.sync_counts</code> warns (never fails) when a
+       window is open but the newest sample is older than 45 minutes — 180 in a
+       slow window — which is what a stalled cron-job.org dispatch looks like
+       from this side.</p></div>
 
   <h2 id="terms">Semester codes</h2>
   <p>The <code>cmmnCd</code> term codes are year-independent (combine with a year):</p>

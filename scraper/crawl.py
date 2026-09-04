@@ -27,8 +27,7 @@ import sys
 import threading
 from collections.abc import Callable
 from contextlib import nullcontext
-from datetime import date, datetime, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from datetime import datetime
 
 import requests
 
@@ -38,32 +37,14 @@ import excel
 import parse
 import process_lock
 import session as snu_session
+import windows
 
 log = logging.getLogger("class-checker")
 
 
 def _today_iso(now: datetime | None = None) -> str:
-    """Return today's date in the configured collection timezone.
-
-    The crawler runs on a host whose process timezone may not match the SNU
-    collection schedule. An explicit ``COLLECTION_TIMEZONE`` keeps the boundary
-    at midnight in the schedule's timezone. With no setting, preserve the
-    historical host-local behavior.
-    """
-    supplied_now = now is not None
-    if now is None:
-        now = datetime.now(timezone.utc)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-
-    timezone_name = (os.environ.get("COLLECTION_TIMEZONE") or "").strip()
-    if not timezone_name:
-        return (now.date() if supplied_now else date.today()).isoformat()
-    try:
-        zone = ZoneInfo(timezone_name)
-    except ZoneInfoNotFoundError as exc:
-        raise ValueError(f"unknown COLLECTION_TIMEZONE: {timezone_name}") from exc
-    return now.astimezone(zone).date().isoformat()
+    """Today's date in the configured collection timezone (see `windows`)."""
+    return windows.today_iso(now)
 
 
 def _in_window(start_env: str, end_env: str) -> bool:
@@ -71,31 +52,36 @@ def _in_window(start_env: str, end_env: str) -> bool:
     optional). Gates which volatile metric is sampled into the 인원 추이 history:
     장바구니 (CART_START/CART_END) and 수강 인원 (ENROLL_START/ENROLL_END). Unset
     bounds mean 'always', so the default behaviour is unchanged."""
-    today = _today_iso()
-    s = (os.environ.get(start_env) or "").strip()
-    e = (os.environ.get(end_env) or "").strip()
-    if s and today < s:
-        return False
-    if e and today > e:
-        return False
-    return True
+    return windows.in_window(os.environ.get(start_env),
+                             os.environ.get(end_env), _today_iso())
 
 
 def _in_windows(spec: str) -> bool:
-    """True if today falls in ANY window of a comma-separated list, each window a
-    'YYYY-MM-DD' single day or 'YYYY-MM-DD..YYYY-MM-DD' inclusive range (a blank bound
-    is open). Lets one metric be sampled across several disjoint periods — 예비/본
-    수강신청, 개강전·개강후 변경 — without collecting through the dead gaps between them."""
-    today = _today_iso()
-    for w in (spec or "").split(","):
-        w = w.strip()
-        if not w:
-            continue
-        s, _, e = w.partition("..")
-        s = s.strip(); e = e.strip() or s
-        if (not s or today >= s) and (not e or today <= e):
-            return True
-    return False
+    """True if today falls in ANY window of the comma-separated list."""
+    return windows.in_windows(spec, _today_iso())
+
+
+def _slow_enroll_open(now: datetime | None = None) -> bool:
+    """True inside an ENROLL_SLOW_WINDOWS period, on its hourly sampling slot.
+
+    수강취소 runs for weeks (2026-2: 09-08 ~ 10-20) and must keep being
+    collected, but at the 10-minute registration cadence it would add ~1.2M
+    samples a day for numbers that barely move. A slow window keeps the history
+    unbroken at one sample per hour; nothing is discarded, it is simply not
+    oversampled."""
+    spec = (os.environ.get("ENROLL_SLOW_WINDOWS") or "").strip()
+    if not spec or not _in_windows(spec):
+        return False
+    return windows.hour_slot_open(now, _slow_slot_minutes())
+
+
+def _slow_slot_minutes() -> int:
+    raw = (os.environ.get("ENROLL_SLOW_SLOT_MINUTES") or "").strip()
+    try:
+        value = int(raw) if raw else 10
+    except ValueError:
+        value = 10
+    return max(1, min(60, value))
 
 
 def _sample_windows() -> dict:
@@ -103,8 +89,9 @@ def _sample_windows() -> dict:
     # legacy single CART_START/END + ENROLL_START/END window when a list is unset.
     cart = (os.environ.get("CART_WINDOWS") or "").strip()
     enr = (os.environ.get("ENROLL_WINDOWS") or "").strip()
+    enrolled = _in_windows(enr) if enr else _in_window("ENROLL_START", "ENROLL_END")
     return {"collect_cart": _in_windows(cart) if cart else _in_window("CART_START", "CART_END"),
-            "collect_enrolled": _in_windows(enr) if enr else _in_window("ENROLL_START", "ENROLL_END")}
+            "collect_enrolled": enrolled or _slow_enroll_open()}
 
 
 def _forced_windows() -> dict:

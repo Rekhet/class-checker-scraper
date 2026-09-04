@@ -7,4 +7,7 @@ WorkingDirectory=%h/project/class-checker
 RuntimeDirectory=class-checker
 RuntimeDirectoryMode=0700
 Environment=TMPDIR=%t/class-checker
+# A persistent timer replays a missed activation on resume, before the link is
+# up; wait for the hosts the run needs instead of dying on the first lookup.
+ExecStartPre=%h/project/class-checker/scripts/wait-online.sh
 ExecStart=%h/project/class-checker/scripts/update.sh

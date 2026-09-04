@@ -257,39 +257,48 @@ class PublishScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(publish_log.read_text(encoding="utf-8").strip(), "0|counts")
 
-    def test_full_update_reads_canonical_semester(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            project = Path(tmp)
-            scripts = project / "scripts"
-            scripts.mkdir()
-            shutil.copy2(ROOT / "scripts/update.sh", scripts / "update.sh")
-            shutil.copy2(ROOT / "scripts/publish.sh", scripts / "publish.sh")
-            (project / "collect.env").write_text(
-                "COUNT_YEAR=2099\nCOUNT_SEM=spring\n", encoding="utf-8"
+    def _full_update_sandbox(self, tmp: str, *, remote_env: bool):
+        """A throwaway project tree for scripts/update.sh: stub make/python and
+        a publish.sh that only records how it was called."""
+        project = Path(tmp)
+        scripts = project / "scripts"
+        scripts.mkdir()
+        shutil.copy2(ROOT / "scripts/update.sh", scripts / "update.sh")
+        shutil.copy2(ROOT / "scripts/publish.sh", scripts / "publish.sh")
+        (project / "collect.env").write_text(
+            "COUNT_YEAR=2099\nCOUNT_SEM=spring\n", encoding="utf-8"
+        )
+        if remote_env:
+            (project / "turso-remote.env").write_text(
+                "TURSO_DATABASE_URL=libsql://example.turso.io\n"
+                "TURSO_AUTH_TOKEN=stub\n", encoding="utf-8"
             )
 
-            fake_bin = project / "bin"
-            fake_bin.mkdir()
-            make_log = project / "make.log"
-            _executable(
-                fake_bin / "make",
-                "#!/bin/sh\n"
-                "printf '%s\\n' \"$*\" > \"$MAKE_LOG\"\n",
-            )
-            fake_python = fake_bin / "python"
-            _executable(fake_python, "#!/bin/sh\nexit 0\n")
+        fake_bin = project / "bin"
+        fake_bin.mkdir()
+        make_log = project / "make.log"
+        _executable(
+            fake_bin / "make",
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$*\" > \"$MAKE_LOG\"\n",
+        )
+        fake_python = fake_bin / "python"
+        _executable(fake_python, "#!/bin/sh\nexit 0\n")
 
-            env = os.environ.copy()
-            env.update(
-                {
-                    "PATH": f"{fake_bin}:{env['PATH']}",
-                    "MAKE_LOG": str(make_log),
-                    "CLASS_CHECKER_PROCESS_LOCK_HELD": "1",
-                    "PUBLISH_GIT": "0",
-                    "PY": str(fake_python),
-                }
-            )
-            result = subprocess.run(
+        env = os.environ.copy()
+        env.update(
+            {
+                "PATH": f"{fake_bin}:{env['PATH']}",
+                "MAKE_LOG": str(make_log),
+                "CLASS_CHECKER_PROCESS_LOCK_HELD": "1",
+                "PUBLISH_GIT": "0",
+                "PY": str(fake_python),
+            }
+        )
+        env.pop("UPDATE_CRAWL", None)
+
+        def run():
+            return subprocess.run(
                 ["bash", str(scripts / "update.sh")],
                 cwd=project,
                 env=env,
@@ -297,6 +306,36 @@ class PublishScriptTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+
+        return run, env, make_log
+
+    def test_full_update_publishes_cloud_counts_without_crawling(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run, _env, make_log = self._full_update_sandbox(tmp, remote_env=True)
+
+            result = run()
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # the 인원 pass runs on GitHub-hosted runners; the scheduled local
+            # run merges and publishes, it does not crawl sugang
+            self.assertFalse(make_log.exists(), make_log.read_text()
+                             if make_log.exists() else "")
+
+    def test_full_update_without_a_counts_source_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run, _env, _make_log = self._full_update_sandbox(tmp, remote_env=False)
+
+            result = run()
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("turso-remote.env is missing", result.stderr)
+
+    def test_full_update_crawl_opt_in_reads_canonical_semester(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run, env, make_log = self._full_update_sandbox(tmp, remote_env=True)
+            env["UPDATE_CRAWL"] = "1"
+
+            result = run()
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(make_log.read_text(encoding="utf-8").strip(),
@@ -304,26 +343,12 @@ class PublishScriptTests(unittest.TestCase):
                              "COLLECT=catalog,enrollment,grading")
 
             env["UPDATE_COLLECTIONS"] = "CATALOG,CART"
-            uppercase_blocked = subprocess.run(
-                ["bash", str(scripts / "update.sh")],
-                cwd=project,
-                env=env,
-                check=False,
-                capture_output=True,
-                text=True,
-            )
+            uppercase_blocked = run()
             self.assertEqual(uppercase_blocked.returncode, 2)
             self.assertIn("cannot collect cart", uppercase_blocked.stderr)
 
             env["UPDATE_COLLECTIONS"] = "cart"
-            blocked = subprocess.run(
-                ["bash", str(scripts / "update.sh")],
-                cwd=project,
-                env=env,
-                check=False,
-                capture_output=True,
-                text=True,
-            )
+            blocked = run()
             self.assertEqual(blocked.returncode, 2)
             self.assertIn("cannot collect cart", blocked.stderr)
             self.assertEqual(make_log.read_text(encoding="utf-8").strip(),
