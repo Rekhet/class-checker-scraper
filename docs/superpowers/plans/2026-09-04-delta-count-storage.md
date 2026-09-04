@@ -2,10 +2,12 @@
 
 ## Status
 
-Implemented 2026-09-04. Verified against the live catalog (6.9M dense rows
-migrated in place) and 138 unit tests. The remote collector is still disabled:
-the cloud database is over quota until 2026-10-01, and a new database will be
-created for it.
+Implemented and deployed 2026-09-04. Verified against the live catalog (6.9M
+dense rows migrated in place) and 140 unit tests. The collector now runs
+against a new cloud database (`class-checker-jasonr`, Tokyo) seeded from the
+local catalog; the exhausted one is left untouched until its quota resets on
+2026-10-01, when the samples stranded in it (13:52~15:10 that day) can still be
+pulled.
 
 ## Why
 
@@ -63,10 +65,26 @@ pass axis, forward-filling each metric, so the frontend needs no change.
   database compares its first pass against real numbers instead of rewriting
   the whole roster.
 
+## Deployment (2026-09-04)
+
+1. Pushed the delta code — the runners check out `main`, so this had to land
+   before the collector was re-enabled.
+2. `turso db create class-checker` on the new account, then
+   `migrate_to_turso.py --src data/turso.db` seeded 28 terms, 110,162 classes,
+   115,636 slots and 8,652 count_latest baselines. The roster drift is gone as
+   a side effect: the cloud now knows all 8,652 classes, not 8,649.
+3. `gh secret set TURSO_DATABASE_URL/TURSO_AUTH_TOKEN`, then
+   `gh workflow enable collect-counts`.
+4. First runner pass: `bootstrap {'classes': 8652, 'latest': 8652}` ->
+   `push {'pushed': 254, 'passes': 1, 'latest': 254}`. The local pull merged
+   254 rows and 1 pass, the overlay refreshed all 8,652 classes, and the site
+   published. Two consecutive cron-job.org dispatches then succeeded, so the
+   local bridge timer was disabled again.
+
 ## Follow-up
 
-- The remote collector stays disabled until the new cloud database exists;
-  local collection (`class-checker.update-counts.timer`, COUNT_MODE=enrollment)
-  is the bridge.
 - Stage 2 (catalog collection in the cloud, publishing from Actions) is
   unchanged by this work and still pending.
+- `class-checker.update-counts.service.d/cloud-outage.conf` (COUNT_MODE=
+  enrollment) stays on disk for the next outage; it only takes effect while
+  that timer is enabled.
