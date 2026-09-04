@@ -321,14 +321,18 @@ class PublishScriptTests(unittest.TestCase):
             self.assertFalse(make_log.exists(), make_log.read_text()
                              if make_log.exists() else "")
 
-    def test_full_update_without_a_counts_source_fails_closed(self) -> None:
+    def test_full_update_publishes_even_without_a_counts_source(self) -> None:
+        # A pull that cannot run must never withhold publication: local workers
+        # may have collected this hour, and pending trend commits in web/ are
+        # pushed by this run alone.
         with tempfile.TemporaryDirectory() as tmp:
             run, _env, _make_log = self._full_update_sandbox(tmp, remote_env=False)
 
             result = run()
 
-            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("turso-remote.env is missing", result.stderr)
+            self.assertIn("publishing whatever is already local", result.stderr)
 
     def test_full_update_crawl_opt_in_reads_canonical_semester(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

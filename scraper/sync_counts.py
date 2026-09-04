@@ -39,6 +39,10 @@ except ImportError:  # pragma: no cover - direct script execution
 FAST_STALE_MINUTES = 45
 SLOW_STALE_MINUTES = 180
 
+# Distinct from argparse's 2 and a crash's 1, so a caller can tell "published,
+# but the data behind it is stale" from "could not run".
+STALE_EXIT = 3
+
 
 def staleness_warning(ts: str | None, now: datetime | None = None) -> str | None:
     """A warning line when counts should be moving but the newest sample is old.
@@ -76,6 +80,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help="catalog year (default: COUNT_YEAR)")
     ap.add_argument("--semester", default=os.environ.get("COUNT_SEM", ""),
                     help="semester alias or term code (default: COUNT_SEM)")
+    ap.add_argument("--fail-if-stale", action="store_true",
+                    help="exit 3 (instead of only warning) when a collection "
+                         "window is open and the newest sample is old")
     return ap
 
 
@@ -106,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
     warning = staleness_warning(newest)
     if warning:
         print(warning, file=sys.stderr)
+        if args.fail_if_stale:
+            return STALE_EXIT
     return 0
 
 

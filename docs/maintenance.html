@@ -29,9 +29,11 @@
      freeze at the last crawl while the trend kept advancing. A NULL sample
      column — a metric outside its collection window — leaves the stored value
      alone.</p>
-  <p>A missing <code>turso-remote.env</code> or a failed pull fails the run:
-     it is the only source of fresh data, and silently republishing yesterday's
-     numbers would hide the outage. <code>class-checker.update.service</code>
+  <p>A missing <code>turso-remote.env</code> or a failed pull warns and still
+     publishes — local workers may have collected this hour, and pending trend
+     commits in <code>web/</code> are pushed by this run alone — and the run
+     exits nonzero afterwards only when the newest sample is also stale for an
+     open window. <code>class-checker.update.service</code>
      runs <code>scripts/wait-online.sh</code> as <code>ExecStartPre</code>,
      because the persistent timer replays a missed activation the moment the
      machine resumes — seconds before the link is configured, which used to

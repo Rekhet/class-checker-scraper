@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from scraper import crawl, windows
-from scraper.sync_counts import staleness_warning
+from scraper.sync_counts import main as sync_main, staleness_warning
 
 
 SEOUL = {"COLLECTION_TIMEZONE": "Asia/Seoul"}
@@ -114,6 +114,23 @@ class StalenessWarningTests(unittest.TestCase):
         with patch.dict(os.environ, self.ENV, clear=False):
             self.assertIn("no samples exist yet",
                           staleness_warning(None, _seoul(14, 0)))
+
+
+class StaleExitCodeTests(unittest.TestCase):
+    def test_fail_if_stale_reports_a_distinct_exit_code(self) -> None:
+        env = dict(SEOUL, CART_WINDOWS="", ENROLL_SLOW_WINDOWS="",
+                   ENROLL_WINDOWS=windows.today_iso())
+        with patch.dict(os.environ, env, clear=False), \
+             patch("scraper.sync_counts.db.connect") as connect, \
+             patch("scraper.sync_counts.db.apply_latest_samples",
+                   return_value={"ts": "2020-01-01T00:00:00", "updated": 0}):
+            connect.return_value.close.return_value = None
+            stale = sync_main(["--year", "2026", "--semester", "fall",
+                               "--fail-if-stale"])
+            warn_only = sync_main(["--year", "2026", "--semester", "fall"])
+
+        self.assertEqual(stale, 3)
+        self.assertEqual(warn_only, 0)
 
 
 if __name__ == "__main__":

@@ -5,10 +5,29 @@ pass runs on GitHub-hosted runners (cron-job.org -> `collect-counts.yml` ->
 `scraper/cloud_collect.py` -> cloud Turso), so `scripts/update.sh` merges those
 samples (`scraper/pull_counts.py`), copies the newest sample onto the catalog's
 volatile columns (`python -m scraper.sync_counts`), and publishes. A missing
-`turso-remote.env` or a failed pull fails the run: it is the only source of
-fresh data, and republishing yesterday's numbers silently would hide the
-outage. Set `UPDATE_CRAWL=1` for an intentional catalog/평가방식 refresh, which
-only a local crawl can collect; both failures then degrade to warnings.
+`turso-remote.env` or a failed pull warns and **still publishes** — local
+workers may have collected this hour, and pending trend commits in `web/` are
+pushed by this run alone — and the run then exits nonzero only if the newest
+sample is also stale for an open collection window. Set `UPDATE_CRAWL=1` for an
+intentional catalog/평가방식 refresh, which only a local crawl can collect.
+
+### Temporary: collecting locally during a cloud outage
+
+When the cloud Turso database is unusable (2026-09-04: the free plan's
+read/write quota ran out mid-semester, resetting only on 10-01), enable the
+legacy 10-minute worker so 수강인원 keeps being collected from this machine:
+
+```sh
+systemctl --user enable --now class-checker.update-counts.timer
+# drop-in: [Service] Environment=COUNT_MODE=enrollment
+#   collect.env's COUNT_MODE=cart is for the 장바구니 window
+```
+
+It is still window-gated by `collect.env`, so it costs nothing off-season, and
+the hourly full update publishes what it collects. Disable it again once the
+remote collector is running, and keep the `collect-counts` workflow disabled
+(`gh workflow disable collect-counts`) while the database refuses writes, so
+every dispatch does not turn into a failure mail.
 
 `class-checker.update.service` runs `scripts/wait-online.sh` as `ExecStartPre`.
 The timer is persistent, so a missed activation is replayed the moment the

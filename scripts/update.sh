@@ -59,10 +59,15 @@ fi
 
 # Merge cloud-collected count samples (GitHub Actions collector) into the local
 # catalog. Scoped to a subshell so the remote TURSO_* credentials never leak
-# into a local crawl above or the publish below. This is the only source of
-# fresh data for a scheduled run, so a failure is fatal — the run fails loudly
-# instead of republishing yesterday's numbers. A local crawl of its own makes
-# the pull optional again.
+# into a local crawl above or the publish below.
+#
+# A failure here is NOT allowed to skip publication: local workers
+# (scripts/update-counts.sh, the bounded window services) may have collected
+# samples this hour, and pending trend commits in web/ are pushed by this run
+# only. So the pull degrades to a warning, publication always happens, and the
+# run reports failure at the very end if the data behind it turned out to be
+# stale — loud, but never at the cost of shipping what we do have.
+PULL_FAILED=0
 if [ -f "$ROOT/turso-remote.env" ]; then
   if ! (
     set -a
@@ -70,23 +75,36 @@ if [ -f "$ROOT/turso-remote.env" ]; then
     set +a
     "$PY" "$ROOT/scraper/pull_counts.py"
   ); then
-    if [ "$UPDATE_CRAWL" = "1" ]; then
-      echo "warn: cloud counts pull failed; publishing locally crawled data only" >&2
-    else
-      echo "error: cloud counts pull failed and no local crawl ran; nothing fresh to publish" >&2
-      exit 1
-    fi
+    PULL_FAILED=1
+    echo "warn: cloud counts pull failed; publishing whatever is already local" >&2
   fi
 elif [ "$UPDATE_CRAWL" != "1" ]; then
-  echo "error: turso-remote.env is missing; the scheduled update has no counts source" >&2
-  exit 2
-else
-  echo "warn: turso-remote.env is missing; publishing locally crawled data only" >&2
+  PULL_FAILED=1
+  echo "warn: turso-remote.env is missing; publishing whatever is already local" >&2
 fi
 
 # Copy the newest sample onto the catalog's volatile columns: the static export
 # reads them off `classes`, which no longer moves on its own without a crawl.
-"$PY" -m scraper.sync_counts --year "$UPDATE_YEAR" --semester "$UPDATE_SEM"
+# With no fresh input this run, ask it to report staleness as an exit code.
+SYNC_STALE=0
+SYNC_ARGS=(--year "$UPDATE_YEAR" --semester "$UPDATE_SEM")
+if [ "$PULL_FAILED" = "1" ] && [ "$UPDATE_CRAWL" != "1" ]; then
+  SYNC_ARGS+=(--fail-if-stale)
+fi
+# `if ! cmd` would swallow the code (the negation itself succeeds), and the
+# distinction between 3 (stale) and anything else is the point here.
+sync_status=0
+"$PY" -m scraper.sync_counts "${SYNC_ARGS[@]}" || sync_status=$?
+if [ "$sync_status" = "3" ]; then
+  SYNC_STALE=1
+elif [ "$sync_status" != "0" ]; then
+  exit "$sync_status"
+fi
 
 PUBLISH_COMMIT_MESSAGE="${PUBLISH_COMMIT_MESSAGE:-chore(data): update}" \
   "$ROOT/scripts/publish.sh" full
+
+if [ "$SYNC_STALE" = "1" ]; then
+  echo "error: published, but no fresh counts arrived and the collection window is open" >&2
+  exit 1
+fi
