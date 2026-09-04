@@ -42,6 +42,11 @@ host-local `data/.crawl.lock`. The lock is held across the database operation,
 JSON export, and Git publication, so a counts pass cannot read a half-rebuilt
 term or publish over another update.
 
+Publication retries a failed push (up to three attempts, growing backoff, and a
+larger `http.postBuffer`): the trend file is ~27 MB and GitHub occasionally
+drops the upload with `RPC failed; HTTP 408`. The commit is already made when
+that happens, so without the retry the site silently stayed an hour behind.
+
 The bounded cart/enrollment/trend services commit each generated trend update in the
 `web/` repository but deliberately does not push it. The hourly
 `class-checker.update.timer` runs the full update and is the scheduled push

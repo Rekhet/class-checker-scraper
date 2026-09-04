@@ -110,7 +110,22 @@ case "$AHEAD" in
 esac
 
 if [ "$AHEAD" -gt 0 ]; then
-  git -C "$WEB_ROOT" push
+  # The trend file is ~27 MB, and GitHub occasionally drops the upload
+  # mid-stream ("RPC failed; HTTP 408", twice on 2026-09-04). The commit is
+  # already made, so a failed push silently held the site a full hour behind
+  # until the next run. Retry before giving up; a larger post buffer keeps the
+  # push in one request instead of a chunked stream.
+  for attempt in 1 2 3; do
+    if git -C "$WEB_ROOT" -c http.postBuffer=524288000 push; then
+      break
+    fi
+    if [ "$attempt" = "3" ]; then
+      echo "error: push failed after $attempt attempts" >&2
+      exit 1
+    fi
+    echo "warn: push attempt $attempt failed; retrying" >&2
+    sleep $((attempt * 10))
+  done
 else
   echo "no local commits to push"
 fi
