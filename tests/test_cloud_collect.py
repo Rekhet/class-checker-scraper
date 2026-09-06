@@ -106,3 +106,36 @@ class PushSamplesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PushScopeTests(unittest.TestCase):
+    def test_bootstrapped_passes_are_not_pushed_back(self) -> None:
+        """The scratch DB carries the cloud's keyframe passes so the sampler
+        knows when the term was last re-stated in full. Pushing their
+        count_latest rows again would rewrite the whole roster every run."""
+        local = sqlite3.connect(":memory:")
+        local.row_factory = sqlite3.Row
+        db.init_schema(db._Conn(local, "sqlite"))
+        # one pass copied from the cloud, one produced by this run
+        db.record_pass(local, "2026", "T1", "2026-09-05T09:00:00",
+                       applied=True, cart=False, enrolled=True, full=True)
+        local.executemany(
+            "INSERT INTO count_latest (year, term, sbjt_cd, lt_no, ts, applied)"
+            " VALUES (?,?,?,?,?,?)",
+            [("2026", "T1", "OLD", "001", "2026-09-05T09:00:00", 1),
+             ("2026", "T1", "NEW", "001", "2026-09-06T09:00:00", 2)])
+        db.record_pass(local, "2026", "T1", "2026-09-06T09:00:00",
+                       applied=True, cart=False, enrolled=True)
+        local.commit()
+
+        remote = sqlite3.connect(":memory:")
+        remote.row_factory = sqlite3.Row
+        db.init_schema(db._Conn(remote, "sqlite"))
+
+        out = push_samples(
+            local, remote, skip_pass_ts=["2026-09-05T09:00:00"])
+
+        self.assertEqual(out["passes"], 1)
+        self.assertEqual(out["latest"], 1)
+        pushed = remote.execute("SELECT sbjt_cd FROM count_latest").fetchall()
+        self.assertEqual([r[0] for r in pushed], ["NEW"])

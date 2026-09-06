@@ -96,21 +96,27 @@ def bootstrap_local(remote, local, *, year: str, term: str) -> dict:
     return counts
 
 
-def push_samples(local, remote) -> dict:
+def push_samples(local, remote, *, skip_pass_ts=()) -> dict:
     """Push this run's deltas, its pass rows, and the moved classes' new values.
 
     Only classes whose numbers changed produce a sample, so a pass writes about
     1% of the roster instead of all of it; the count_passes row keeps the trend
     axis complete even when nothing moved at all.
     """
+    # The scratch DB was bootstrapped with the cloud's keyframe passes so the
+    # sampler knows when the term was last re-stated; those are already in the
+    # cloud, and pushing their count_latest rows again would rewrite the whole
+    # roster every run - exactly the write amplification deltas exist to avoid.
+    skip = set(skip_pass_ts)
     rows = local.execute(
         f"SELECT {', '.join(SAMPLE_COLS)} FROM count_samples").fetchall()
-    passes = local.execute(
+    passes = [r for r in local.execute(
         f"SELECT {', '.join(PASS_COLS)} FROM count_passes").fetchall()
-    latest = local.execute(
+        if r[2] not in skip]
+    own_ts = {r[2] for r in passes}
+    latest = [r for r in local.execute(
         "SELECT year, term, sbjt_cd, lt_no, ts, applied, cart, enrolled, quota,"
-        " cancel_vacancy FROM count_latest WHERE ts IN "
-        "(SELECT ts FROM count_passes)").fetchall()
+        " cancel_vacancy FROM count_latest").fetchall() if r[4] in own_ts]
     db.insert_chunked(remote, "count_samples", SAMPLE_COLS,
                       [tuple(r) for r in rows])
     for pass_row in passes:
@@ -165,6 +171,10 @@ def main(argv: list[str] | None = None) -> int:
     remote.close()   # crawl takes minutes; never hold a remote stream across it
     print(f"bootstrap: {counts}")
 
+    # Captured BEFORE sampling: everything already here came from the cloud.
+    bootstrapped_passes = [r[0] for r in local.execute(
+        "SELECT ts FROM count_passes").fetchall()]
+
     conn = db._Conn(local, "sqlite")
     out = crawl.refresh_counts_all(
         conn, [args.year], terms=[term],
@@ -173,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"collect: {out}")
 
     remote = _remote_connect()
-    pushed = push_samples(local, remote)
+    pushed = push_samples(local, remote, skip_pass_ts=bootstrapped_passes)
     remote.close()
     local.close()
     print(f"push: {pushed}")
