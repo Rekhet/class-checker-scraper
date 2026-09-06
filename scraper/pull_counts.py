@@ -35,7 +35,8 @@ _INSERT = (
     "WHERE year=? AND term=? AND sbjt_cd=? AND lt_no=? AND ts=?)"
 )
 
-PASS_COLUMNS = ("year", "term", "ts", "applied", "cart", "enrolled")
+PASS_COLUMNS = ("year", "term", "ts", "applied", "cart", "enrolled",
+                "full")
 _PASS_INSERT = (
     f"INSERT OR REPLACE INTO count_passes ({', '.join(PASS_COLUMNS)}) "
     f"VALUES ({', '.join('?' * len(PASS_COLUMNS))})"

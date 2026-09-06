@@ -46,7 +46,9 @@ Consequences every change must respect:
   class). Writing every class every pass exhausted the cloud plan's write
   quota mid-semester on 2026-09-04 and stopped collection; do not restore
   dense writes, and do not prune old samples — a deleted row is the baseline
-  a later delta is relative to.
+  a later delta is relative to. Every `COUNT_KEYFRAME_HOURS` (default 24) a
+  pass re-states every class (`count_passes.full=1`); that is the only thing
+  that heals a writer/reader baseline split, so do not remove it.
 - **Verify a collector change against an actual runner pass** (the next
   cron run's samples in the cloud DB), not only against a local run.
 - **Only `count_samples` crosses the cloud boundary.** Catalog facts (new,

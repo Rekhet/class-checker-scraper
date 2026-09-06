@@ -64,7 +64,7 @@ def _copy_query(remote, local, table: str, where: str = "", params=()) -> int:
 
 SAMPLE_COLS = ["year", "term", "sbjt_cd", "lt_no", "ts",
                "applied", "cart", "enrolled", "quota", "cancel_vacancy"]
-PASS_COLS = ["year", "term", "ts", "applied", "cart", "enrolled"]
+PASS_COLS = ["year", "term", "ts", "applied", "cart", "enrolled", "full"]
 
 
 def bootstrap_local(remote, local, *, year: str, term: str) -> dict:
@@ -83,6 +83,13 @@ def bootstrap_local(remote, local, *, year: str, term: str) -> dict:
         ),
         "latest": _copy_query(
             remote, local, "count_latest", "year=? AND term=?", (year, term)
+        ),
+        # Only the keyframe passes: the scratch DB has no history of its own,
+        # and db.keyframe_due() has to know when this term was last re-stated
+        # in full or every run would think a keyframe is overdue.
+        "keyframes": _copy_query(
+            remote, local, "count_passes", "full=1 AND year=? AND term=?",
+            (year, term)
         ),
     }
     local.commit()

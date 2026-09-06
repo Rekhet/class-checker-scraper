@@ -106,6 +106,14 @@
      sample at or before it, and leaves a metric the pass did not collect as
      <code>null</code> — a closed 장바구니 window must not draw a flat line
      through 수강신청.</p>
+  <p>Every <code>COUNT_KEYFRAME_HOURS</code> (default 24) a pass instead
+     re-states <strong>every</strong> class and marks itself
+     <code>count_passes.full = 1</code>. A delta only means something against
+     the baseline its writer held, so if the writer's and the reader's
+     baselines ever diverge — seeding a new collector database while a local
+     worker was still sampling did exactly this on 2026-09-04 — the writer sees
+     "no change" and never sends the value the reader is missing. The keyframe
+     is what makes that split heal itself within a day.</p>
   <div class="callout warn"><span class="ic">📉</span>
     <p>Storing every class every pass wrote ~1.25M rows a day and exhausted the
        cloud database's monthly write quota mid-semester on 2026-09-04, which

@@ -91,6 +91,24 @@ curl 'http://127.0.0.1:8011/api/search?name=경제&level=학사&day=0'</code></p
      the Excel download, cell sweep, and count overlay phases; on completion the
      search results, stats, and saved timetable all refresh.</p>
 
+  <h3 id="json-safety">Static JSON validation</h3>
+  <p>The static frontend treats its JSON files and browser-imported files as data
+     interfaces, not as arbitrary JavaScript. The catalog index validates term
+     identities and JSON filenames; class rows validate their scalar fields,
+     nullable counts, classifications, and meeting slots; trend data requires
+     date strings plus integer-or-null metric arrays whose lengths match
+     <code>ts</code>. The explorer and graduation indexes validate their
+     cross-reference types before building maps.</p>
+  <p>A malformed term file is isolated to that term and contributes no search
+     rows. A malformed trend, explorer, or graduation payload fails only its
+     feature and shows the feature's fallback state. Invalid imported timetable
+     or wishlist entries are rejected before catalog resolution, and malformed
+     local-storage entries are ignored individually. Trend tooltips are built
+     with DOM text nodes, so JSON values are not interpolated into HTML.</p>
+  <p>There is intentionally no payload-size or array-length cap in this layer.
+     Validation checks shape, references, and data types while allowing valid
+     future terms and larger catalogs.</p>
+
   <div class="docfoot"><a href="database.html">← Database</a><a href="maintenance.html">Next: Maintenance →</a></div>
 
 </article>

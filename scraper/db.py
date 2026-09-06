@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS count_passes (
     applied  INTEGER NOT NULL DEFAULT 0,   -- 1 = 신청 인원 collected this pass
     cart     INTEGER NOT NULL DEFAULT 0,   -- 1 = 장바구니 collected this pass
     enrolled INTEGER NOT NULL DEFAULT 0,   -- 1 = 수강 인원 (+취소여석) collected
+    full     INTEGER NOT NULL DEFAULT 0,   -- 1 = keyframe: every class written
     PRIMARY KEY (year, term, ts)
 );
 
@@ -331,6 +332,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
     scols = [r[1] for r in conn.execute("PRAGMA table_info(count_samples)").fetchall()]
     if scols and "cancel_vacancy" not in scols:
         conn.execute("ALTER TABLE count_samples ADD COLUMN cancel_vacancy INTEGER")
+    pcols = [r[1] for r in conn.execute("PRAGMA table_info(count_passes)").fetchall()]
+    if pcols and "full" not in pcols:
+        conn.execute("ALTER TABLE count_passes ADD COLUMN full INTEGER NOT NULL "
+                     "DEFAULT 0")
     # migrate old single-PK terms (term-only) -> composite (year, term) so the
     # same code can coexist across years. Backfill labels from existing classes.
     pk = [r[1] for r in conn.execute("PRAGMA table_info(terms)").fetchall() if r[5]]
@@ -346,6 +351,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 
 SAMPLE_METRICS = ("applied", "cart", "enrolled", "quota", "cancel_vacancy")
+
+# How often a pass re-states every class instead of only the ones that moved.
+# Overridable so a bounded window worker can be told to keyframe more often.
+KEYFRAME_HOURS = int(os.environ.get("COUNT_KEYFRAME_HOURS", "24") or 24)
 
 
 def backfill_delta_tables(conn: sqlite3.Connection) -> dict:
@@ -780,6 +789,11 @@ def sample_counts(conn: sqlite3.Connection, year_terms, ts: str | None = None,
     When BOTH are False (outside every window) nothing is recorded at all, not
     even a pass, so the 인원 추이 trend stays frozen off-season.
 
+    Every `KEYFRAME_HOURS` (default 24) a pass instead re-states EVERY class.
+    A delta only means anything against the baseline its writer held, so two
+    databases whose baselines diverge stay diverged in silence; the keyframe is
+    what makes that self-healing.
+
     `keep_days` is accepted for compatibility and ignored: deleting old rows
     would erase the baseline that later samples are deltas against, and the
     history is the product here.
@@ -789,6 +803,7 @@ def sample_counts(conn: sqlite3.Connection, year_terms, ts: str | None = None,
         return 0   # outside every collection window: record nothing (인원 추이 frozen)
     written = 0
     for year, term in year_terms:
+        keyframe = keyframe_due(conn, year, term, ts)
         rows = conn.execute(
             "SELECT sbjt_cd, lt_no, applied, cart, enrolled, quota, "
             "cancel_vacancy FROM classes WHERE year=? AND term=?",
@@ -815,7 +830,7 @@ def sample_counts(conn: sqlite3.Connection, year_terms, ts: str | None = None,
             # Compare only what this pass actually looked at: a metric left
             # NULL because its window is closed must not read as a change, and
             # must not overwrite the value the metric last had.
-            changed = previous is None or any(
+            changed = keyframe or previous is None or any(
                 value != previous[name]
                 for name, value in sampled.items() if value is not None)
             if not changed:
@@ -850,19 +865,47 @@ def sample_counts(conn: sqlite3.Connection, year_terms, ts: str | None = None,
             ["year", "term", "sbjt_cd", "lt_no", "ts", *SAMPLE_METRICS], current,
             replace=True)
         record_pass(conn, year, term, ts, applied=collect_applied,
-                    cart=collect_cart, enrolled=collect_enrolled)
+                    cart=collect_cart, enrolled=collect_enrolled,
+                    full=keyframe)
         written += len(samples)
     conn.commit()
     return written
 
 
 def record_pass(conn: sqlite3.Connection, year: str, term: str, ts: str, *,
-                applied: bool, cart: bool, enrolled: bool) -> None:
+                applied: bool, cart: bool, enrolled: bool,
+                full: bool = False) -> None:
     """Register one collection pass on the trend's time axis."""
     conn.execute(
         "INSERT OR REPLACE INTO count_passes (year, term, ts, applied, cart, "
-        "enrolled) VALUES (?,?,?,?,?,?)",
-        (year, term, ts, int(applied), int(cart), int(enrolled)))
+        "enrolled, full) VALUES (?,?,?,?,?,?,?)",
+        (year, term, ts, int(applied), int(cart), int(enrolled), int(full)))
+
+
+def keyframe_due(conn: sqlite3.Connection, year: str, term: str,
+                 now: str, hours: int = KEYFRAME_HOURS) -> bool:
+    """True when this pass should record every class, not just the changes.
+
+    A delta is only meaningful against the baseline the writer held, so two
+    databases whose baselines ever diverge stay diverged silently: the writer
+    sees "no change" and never emits the value the reader is missing. That is
+    not hypothetical — seeding a new collector database while a local worker
+    was still sampling left seven classes permanently stale on 2026-09-04.
+    A periodic keyframe re-states every class and heals any such split within
+    `hours`, for the price of one full pass a day.
+    """
+    if hours <= 0:
+        return False
+    last = conn.execute(
+        "SELECT MAX(ts) FROM count_passes WHERE year=? AND term=? AND full=1",
+        (year, term)).fetchone()[0]
+    if last is None:
+        return True
+    from datetime import datetime, timedelta
+    try:
+        return datetime.fromisoformat(now) - datetime.fromisoformat(last) >= timedelta(hours=hours)
+    except ValueError:
+        return True
 
 
 def fold_pass_into_latest(conn: sqlite3.Connection, ts: str) -> int:
