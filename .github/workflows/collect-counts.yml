@@ -42,8 +42,12 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('uv.lock') }}
 
+      # No --with-deps: it runs apt-get update, which fails the whole job
+      # whenever the runner image's preinstalled Google Chrome repo serves a
+      # stale index ("Hash Sum mismatch", 2026-09-09 17:30~17:50 UTC). The
+      # ubuntu-latest image already ships Chromium's shared libraries.
       - name: Install Chromium
-        run: uv run playwright install --with-deps chromium
+        run: uv run playwright install chromium
 
       # cloud_collect bootstraps a local scratch DB from the cloud catalog,
       # crawls against it (a long-lived remote connection would hit Turso's
