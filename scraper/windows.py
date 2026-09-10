@@ -80,11 +80,14 @@ def in_windows(spec: str | None, today: str) -> bool:
 def hour_slot_open(now: datetime | None = None, minutes: int = 10) -> bool:
     """True during the first `minutes` of an hour.
 
-    A slow window keeps collecting through a weeks-long period (수강취소 runs
-    for six weeks) without the 10-minute cadence that period does not need:
-    only the run that lands in the opening minutes of an hour samples, so the
-    history keeps growing at one point per hour instead of six. The width
-    absorbs GitHub's late cron dispatch, which routinely slips several minutes.
+    Thins a slow window's cadence: only the run that lands in the opening
+    minutes of an hour samples. The width absorbs GitHub's late cron dispatch,
+    which routinely slips several minutes.
+
+    collect.env sets ENROLL_SLOW_SLOT_MINUTES to 60, so in practice the gate is
+    open all hour and 수강취소 is sampled at the full 10-minute cadence; see
+    crawl._slow_enroll_open() for why thinning is not worth its cost under
+    delta storage. The mechanism is kept for a period that does need it.
     """
     return now_local(now).minute < minutes
 
@@ -100,8 +103,9 @@ def collection_active(today: str | None = None) -> dict:
     """What collect.env expects to be collected today.
 
     Returns {"cart": bool, "enroll": bool, "slow": bool}; "slow" marks the
-    hourly-cadence periods (수강취소), which are active days too, just sampled
-    six times less often.
+    periods declared slow-moving (수강취소), which are ordinary active days —
+    with ENROLL_SLOW_SLOT_MINUTES at its default they are sampled at the same
+    10-minute cadence as the rest.
     """
     today = today or today_iso()
     return {

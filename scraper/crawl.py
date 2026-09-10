@@ -62,13 +62,21 @@ def _in_windows(spec: str) -> bool:
 
 
 def _slow_enroll_open(now: datetime | None = None) -> bool:
-    """True inside an ENROLL_SLOW_WINDOWS period, on its hourly sampling slot.
+    """True inside an ENROLL_SLOW_WINDOWS period, on its sampling slot.
 
     수강취소 runs for weeks (2026-2: 09-08 ~ 10-20) and must keep being
-    collected, but at the 10-minute registration cadence it would add ~1.2M
-    samples a day for numbers that barely move. A slow window keeps the history
-    unbroken at one sample per hour; nothing is discarded, it is simply not
-    oversampled."""
+    collected. The slot can thin that cadence, but ENROLL_SLOW_SLOT_MINUTES
+    defaults to 60 — the gate stays open for the whole hour, so the period is
+    sampled at the ordinary 10-minute cadence like every other window.
+
+    The old default of 10 (one sample an hour) was arithmetic from the days
+    when every pass stored every class. Under delta storage a row costs one
+    CHANGE, not one pass: six passes an hour write ~1.2x the rows of one (a
+    class rarely moves twice in an hour), and ~90% of a day's volume is the
+    cadence-independent daily keyframe. Measured over 2026-09-08~09 that made
+    thinning worth ~4% of the writes in exchange for 6x coarser timing — which
+    is the whole point of the trend. Narrow the slot only for a period that
+    genuinely needs thinning."""
     spec = (os.environ.get("ENROLL_SLOW_WINDOWS") or "").strip()
     if not spec or not _in_windows(spec):
         return False
