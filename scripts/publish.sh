@@ -38,7 +38,15 @@ fi
 
 case "$MODE" in
   full)
-    "$PY" scraper/export_json.py
+    # EXPORT_SCOPE=current (the scheduled run without a crawl) rewrites only
+    # the collected term's class file, trend, and index entry: past terms and
+    # the explore index change only with a catalog crawl.
+    if [ "${EXPORT_SCOPE:-all}" = "current" ]; then
+      "$PY" scraper/export_json.py --current \
+        --years "${YEAR:-${COUNT_YEAR:-}}" --terms "${SEM:-${COUNT_SEM:-}}"
+    else
+      "$PY" scraper/export_json.py
+    fi
     MESSAGE="${PUBLISH_COMMIT_MESSAGE:-chore(data): update}"
     PUSH_ALLOWED=1
     ;;

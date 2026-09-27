@@ -101,6 +101,11 @@ elif [ "$sync_status" != "0" ]; then
   exit "$sync_status"
 fi
 
+# Without a crawl only the collected term moved (counts overlay + trend), so
+# only it is exported; a crawl may change any term and the explore index.
+EXPORT_SCOPE="current"
+[ "$UPDATE_CRAWL" = "1" ] && EXPORT_SCOPE="all"
+YEAR="$UPDATE_YEAR" SEM="$UPDATE_SEM" EXPORT_SCOPE="$EXPORT_SCOPE" \
 PUBLISH_COMMIT_MESSAGE="${PUBLISH_COMMIT_MESSAGE:-chore(data): update}" \
   "$ROOT/scripts/publish.sh" full
 

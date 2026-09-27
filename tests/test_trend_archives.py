@@ -147,3 +147,61 @@ class ArchiveIndexTests(unittest.TestCase):
 
         self.assertEqual(trend_archive_index(_conn(100), TERM, window=240),
                          {"trendArchives": 0, "trendArchiveStarts": []})
+
+
+class CheckpointTests(unittest.TestCase):
+    def _full_walk(self, conn):
+        from unittest.mock import patch
+        import scraper.export_json as ej
+
+        with patch.object(ej, "_state_before", lambda *a, **k: (None, None)):
+            return export_trend(conn, TERM)
+
+    def test_checkpointed_live_window_equals_a_full_replay(self) -> None:
+        conn = _conn(740)
+        first = export_trend(conn, TERM)      # builds the checkpoint
+        second = export_trend(conn, TERM)     # reads it
+        self.assertEqual(first, self._full_walk(conn))
+        self.assertEqual(second, first)
+
+    def test_an_older_sample_added_later_invalidates_the_checkpoint(self) -> None:
+        conn = _conn(740)
+        export_trend(conn, TERM)
+        # a recovered gap: a sample inside the frozen history
+        conn.execute("UPDATE count_samples SET enrolled=999 "
+                     "WHERE sbjt_cd='M000' AND ts='2026-08-04T03:00:00'")
+        conn.execute("INSERT INTO count_samples (year, term, sbjt_cd, lt_no, ts,"
+                     " applied, enrolled, quota) VALUES ('2026','T1','M999','001',"
+                     "'2026-08-04T03:00:00', 1, 1, 30)")
+        conn.commit()
+        self.assertEqual(export_trend(conn, TERM), self._full_walk(conn))
+
+
+class CheckpointRollForwardTests(unittest.TestCase):
+    def test_a_checkpoint_rolls_forward_when_the_live_window_moves(self) -> None:
+        import sqlite3 as _sqlite
+        from unittest.mock import patch
+        import scraper.export_json as ej
+
+        conn = _conn(740)                         # live window starts at 480
+        export_trend(conn, TERM)
+        # 260 more passes: the live window moves to start at 720
+        rows = []
+        for p in range(740, 1000):
+            ts = f"2026-08-04T{p // 60:02d}:{p % 60:02d}:00"
+            rows += [("2026", "T1", f"M{c:03d}", "001", ts, p, None, p, 30) for c in range(2)]
+        conn.executemany(
+            "INSERT INTO count_samples (year, term, sbjt_cd, lt_no, ts,"
+            " applied, cart, enrolled, quota) VALUES (?,?,?,?,?,?,?,?,?)", rows)
+        conn.commit()
+        walked = []
+        real = ej._walk_samples
+
+        def spy(*args, **kwargs):
+            walked.append(kwargs.get("after_ts"))
+            return real(*args, **kwargs)
+        with patch.object(ej, "_walk_samples", spy):
+            rolled = export_trend(conn, TERM)
+        self.assertEqual(walked[0], "2026-08-04T07:59:00")   # resumed, not replayed
+        with patch.object(ej, "_state_before", lambda *a, **k: (None, None)):
+            self.assertEqual(rolled, export_trend(conn, TERM))

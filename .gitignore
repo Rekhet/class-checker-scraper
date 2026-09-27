@@ -22,6 +22,7 @@ __pycache__/
 /data/*.db-*
 /data/.crawl.lock
 /data/logs/
+/data/trend_cache/
 /data/root.html
 /data/sample_excel.bin
 /data/trend_archive_pre2026/

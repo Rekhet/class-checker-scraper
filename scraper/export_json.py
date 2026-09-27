@@ -73,7 +73,8 @@ def _load_axis(conn, t) -> list[tuple]:
     return [(r[0], bool(r[1]), bool(r[2]), bool(r[3])) for r in derived]
 
 
-def _walk_samples(conn, t, axis: list[tuple], wanted: dict) -> dict:
+def _walk_samples(conn, t, axis: list[tuple], wanted: dict, *,
+                  state: dict | None = None, after_ts: str | None = None) -> dict:
     """Replay the term's samples over `axis`, materialising the wanted windows.
 
     Samples are deltas: a class's row appears only when one of its collected
@@ -82,17 +83,25 @@ def _walk_samples(conn, t, axis: list[tuple], wanted: dict) -> dict:
     otherwise a closed 장바구니 window would draw a flat line through the whole
     수강신청 period. `wanted` maps a window name to a (start, end) half-open
     slice of `axis`; each becomes its own payload with its own local ts axis.
+
+    `state` (+ `after_ts`) resumes from a checkpoint: the per-class values
+    after the pass at `after_ts`, so only later samples are read. Without it
+    the whole term is replayed from its first sample.
     """
     slots = {name: {ts: i for i, (ts, *_flags) in enumerate(axis[lo:hi])}
              for name, (lo, hi) in wanted.items()}
     lengths = {name: hi - lo for name, (lo, hi) in wanted.items()}
     series = {name: {} for name in wanted}
-    state: dict[str, dict] = {}
+    state = {cls: dict(v) for cls, v in (state or {}).items()}
 
-    rows = conn.execute(
-        "SELECT sbjt_cd, lt_no, ts, applied, cart, enrolled, quota "
-        "FROM count_samples WHERE year=? AND term=? ORDER BY ts",
-        (t["year"], t["term"])).fetchall()
+    sql = ("SELECT sbjt_cd, lt_no, ts, applied, cart, enrolled, quota "
+           "FROM count_samples WHERE year=? AND term=?")
+    params: tuple = (t["year"], t["term"])
+    if after_ts is not None:
+        sql += " AND ts > ?"
+        params += (after_ts,)
+        axis = [row for row in axis if row[0] > after_ts]
+    rows = conn.execute(sql + " ORDER BY ts", params).fetchall()
     pending = 0
     for ts, applied_on, cart_on, enrolled_on in axis:
         while pending < len(rows) and rows[pending][2] <= ts:
@@ -122,6 +131,7 @@ def _walk_samples(conn, t, axis: list[tuple], wanted: dict) -> dict:
                 for key in ("a", "c", "e", "q"):
                     if collected[key]:
                         arrays[key][i] = entry[key]
+    series["__state__"] = state          # the values after the last pass walked
     return series
 
 
@@ -271,6 +281,7 @@ def export_trend_archives(conn, t, out_dir: Path,
     if paths:
         series = _walk_samples(conn, t, axis,
                                {name: bounds for name, (_p, bounds) in paths.items()})
+        series.pop("__state__", None)
         for name, (path, bounds) in paths.items():
             _write(path, _payload(axis, bounds, series[name]))
     return complete
@@ -314,6 +325,45 @@ def live_bounds(total: int, window: int | None = None) -> tuple[int, int]:
     return ((complete - 1) * window if complete else 0, total)
 
 
+# Replaying a term from its first sample to reach the live window read all
+# ~7M samples of 2026-2 on every publish (~28 s). The state at the end of the
+# last frozen chunk never changes once written — unless older samples are
+# added later (a recovered gap) — so it is kept as a local cache, keyed by
+# that pass and checked against the number of samples up to it.
+TREND_CACHE = Path(os.environ.get("TREND_CACHE", "data/trend_cache"))
+
+
+def _samples_upto(conn, t, ts: str) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM count_samples WHERE year=? AND term=? AND ts <= ?",
+        (t["year"], t["term"], ts)).fetchone()[0]
+
+
+def _state_before(conn, t, axis: list[tuple], lo: int) -> tuple[dict | None, str | None]:
+    """Per-class values after pass lo-1 (checkpointed), or (None, None) at 0."""
+    if lo <= 0:
+        return None, None
+    ts = axis[lo - 1][0]
+    path = TREND_CACHE / f"state_{t['year']}_{t['term']}.json"
+    count = _samples_upto(conn, t, ts)
+    start, after = None, None
+    try:
+        cached = json.loads(path.read_text(encoding="utf-8"))
+        if cached.get("ts") == ts and cached.get("samples") == count:
+            return cached["state"], ts
+        # an older checkpoint that is still valid: roll it forward to `ts`
+        # (the live window moves into a new chunk every ~240 passes)
+        if (cached.get("ts") or "") < ts \
+                and cached.get("samples") == _samples_upto(conn, t, cached["ts"]):
+            start, after = cached["state"], cached["ts"]
+    except (FileNotFoundError, json.JSONDecodeError, AttributeError, KeyError, TypeError):
+        pass
+    state = _walk_samples(conn, t, axis[:lo], {}, state=start, after_ts=after)["__state__"]
+    TREND_CACHE.mkdir(parents=True, exist_ok=True)
+    _write(path, {"ts": ts, "samples": count, "state": state})
+    return state, ts
+
+
 def export_trend(conn, t) -> dict | None:
     """Compact enrollment time-series for one term (payload format v2, see
     _payload): the live window's passes plus each class's change points
@@ -323,7 +373,9 @@ def export_trend(conn, t) -> dict | None:
     if not axis:
         return None
     bounds = live_bounds(len(axis))
-    series = _walk_samples(conn, t, axis, {"live": bounds})["live"]
+    state, after = _state_before(conn, t, axis, bounds[0])
+    series = _walk_samples(conn, t, axis, {"live": bounds},
+                           state=state, after_ts=after)["live"]
     out = _payload(axis, bounds, series)
     st = conn.execute("SELECT closed, forced_at FROM count_state WHERE year=? AND term=?",
                       (t["year"], t["term"])).fetchone()
@@ -761,12 +813,18 @@ def _export_explore(conn, terms, classes_dir_writer) -> None:
 
 
 def export_trend_only(conn, *, years: list[str] | None = None,
-                      terms: list[str] | None = None) -> int:
+                      terms: list[str] | None = None,
+                      with_classes: bool = False) -> int:
     """Publish only trend JSON for the requested scope.
 
     Counts-only runs do not need to rewrite the 60+ MB class catalog or the
     cross-semester explore index. The existing class index is updated only when
     a term gains its first trend file.
+
+    ``with_classes`` (``--current``) also rewrites the selected terms' class
+    files and their index counts: what a scheduled publish without a crawl
+    changes (the counts overlay). Past terms and the explore index only change
+    with a catalog crawl, which runs the full export instead.
     """
     classes_dir = OUT / "classes"
     trend_dir = OUT / "trend"
@@ -786,6 +844,15 @@ def export_trend_only(conn, *, years: list[str] | None = None,
     entries = {(str(t["year"]), str(t["term"])): t for t in index.get("terms", [])}
     written = 0
     for t in selected:
+        if with_classes:
+            entry = entries.get((str(t["year"]), str(t["term"])))
+            if entry is None:
+                raise RuntimeError(
+                    f"class index has no entry for {t['year']}/{t['term']}; run a full JSON export")
+            rows = db.search(conn, year=t["year"], term=t["term"], limit=None)
+            size = _write(classes_dir / entry["file"], rows)
+            entry["count"] = len(rows)
+            print(f"  {entry['file']}: {len(rows)} classes ({size // 1024} KB)")
         trend = export_trend(conn, t)
         if trend is None:
             continue
@@ -810,6 +877,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Export class-checker data to static JSON")
     ap.add_argument("--trend-only", action="store_true",
                     help="write only trend JSON and the class index pointers")
+    ap.add_argument("--current", action="store_true",
+                    help="write only the selected (collected) terms: class file, "
+                         "trend, and index entry; past terms and explore untouched")
     ap.add_argument("--years", default="",
                     help="comma-separated year scope for --trend-only")
     ap.add_argument("--terms", default="",
@@ -822,12 +892,14 @@ def main(argv: list[str] | None = None) -> None:
     conn = db.connect()
     try:
         OUT.mkdir(parents=True, exist_ok=True)
-        if args.trend_only:
+        if args.trend_only or args.current:
             years = [x for x in args.years.replace(" ", ",").split(",") if x]
-            written = export_trend_only(
-                conn, years=years, terms=select_term_codes(args.terms)
-            )
-            print(f"wrote {written} trend file(s) under {OUT / 'trend'}")
+            terms = select_term_codes(args.terms)
+            if args.current and not (years and terms):
+                raise SystemExit("--current needs --years and --terms (the collected term)")
+            written = export_trend_only(conn, years=years, terms=terms,
+                                        with_classes=args.current)
+            print(f"wrote {written} term(s) under {OUT}")
             return
 
         classes_dir = OUT / "classes"; trend_dir = OUT / "trend"   # class catalog + trend live in subdirs

@@ -48,6 +48,14 @@ larger `http.postBuffer`): the trend file was ~27 MB until the v2 format
 (2026-09-27, now ~0.34 MB) and GitHub occasionally dropped the upload with
 `RPC failed; HTTP 408`. The commit is already made when that happens, so
 without the retry the site silently stayed behind until the next run.
+A scheduled run without a crawl exports only the collected term
+(`EXPORT_SCOPE=current` → `export_json.py --current`): its class file, live
+trend, and index entry. Past terms and `explore-index.json` change only with a
+catalog crawl, which exports everything. The live trend resumes from a local
+checkpoint (`data/trend_cache/`, the per-class state at the end of the last
+frozen chunk, validated by the sample count up to it and rolled forward when
+the window moves) instead of replaying ~7M samples: a run went from ~45 s to
+~19 s including pull and push (measured 2026-09-28).
 Unchanged files are not rewritten: frozen trend chunks stay as written, and
 `explore-index.json` keeps its old `generated` stamp when nothing else in it
 moved (it used to be re-committed every hour for the stamp alone).
