@@ -43,9 +43,13 @@ JSON export, and Git publication, so a counts pass cannot read a half-rebuilt
 term or publish over another update.
 
 Publication retries a failed push (up to three attempts, growing backoff, and a
-larger `http.postBuffer`): the trend file is ~27 MB and GitHub occasionally
-drops the upload with `RPC failed; HTTP 408`. The commit is already made when
-that happens, so without the retry the site silently stayed an hour behind.
+larger `http.postBuffer`): the trend file was ~27 MB until the v2 format
+(2026-09-27, now ~0.34 MB) and GitHub occasionally dropped the upload with
+`RPC failed; HTTP 408`. The commit is already made when that happens, so
+without the retry the site silently stayed behind until the next run.
+Unchanged files are not rewritten: frozen trend chunks stay as written, and
+`explore-index.json` keeps its old `generated` stamp when nothing else in it
+moved (it used to be re-committed every hour for the stamp alone).
 
 The bounded cart/enrollment/trend services commit each generated trend update in the
 `web/` repository but deliberately does not push it. The hourly

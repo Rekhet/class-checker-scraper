@@ -125,28 +125,140 @@ def _walk_samples(conn, t, axis: list[tuple], wanted: dict) -> dict:
     return series
 
 
-def _payload(axis: list[tuple], window: tuple[int, int], series: dict) -> dict:
-    """Wrap one window's series with its ts axis.
+# ---- trend payload v2: change-point encoding ---------------------------------
+# A window holds ~8,600 classes × 4 metrics × 240 passes, yet only a few hundred
+# values actually change inside it: the dense v1 arrays were 27 MB per file,
+# 10 MB of it the literal `null` for a cart metric no pass collected. v2 keeps
+# the same series but stores each one as the points where it changes:
+#
+#   absent / null  -> every pass is null
+#   integer        -> every pass has that value
+#   [i0, v0, i1, v1, ...] (i0 == 0) -> v_k holds from i_k until the next index
+#
+# Which metrics a pass collected lives once per window in "m" (same encoding
+# over 0/1), not in every class's array: the decoder nulls a value whose pass
+# did not collect its metric. So a class that never moves is a few scalars.
+TREND_FORMAT = 2
+_MASKED = ("a", "c", "e")          # quota is recorded by every pass: no mask
 
-    `updated` is the last sample time (= the real data refresh moment); using
+
+def _cp_encode(values: list):
+    """Change-point encode one aligned array (see the format note above)."""
+    if not values:
+        return None
+    first = values[0]
+    out = [0, first]
+    prev = first
+    for i in range(1, len(values)):
+        v = values[i]
+        if v != prev:
+            out += [i, v]
+            prev = v
+    return first if len(out) == 2 else out
+
+
+def _cp_decode(enc, n: int) -> list:
+    if enc is None or isinstance(enc, int):
+        return [enc] * n
+    out = [None] * n
+    for k in range(0, len(enc), 2):
+        end = enc[k + 2] if k + 2 < len(enc) else n
+        out[enc[k]:end] = [enc[k + 1]] * (end - enc[k])
+    return out
+
+
+def _fill_masked(values: list, mask: list) -> list:
+    """Replace the nulls a pass mask will restore with the previous value, so
+    an uncollected pass does not cost two change points."""
+    out, prev = [], None
+    for v, on in zip(values, mask):
+        prev = v if on else prev
+        out.append(prev)
+    return out
+
+
+def _collection_tz() -> str:
+    return (os.environ.get("COLLECTION_TIMEZONE") or "").strip() or "Asia/Seoul"
+
+
+def _epoch(ts: str, tz: str) -> int:
+    """Pass timestamps are wall-clock in the collection timezone; the client
+    gets absolute epoch seconds so a viewer abroad sees KST, not a shift."""
+    from zoneinfo import ZoneInfo
+
+    dt = datetime.fromisoformat(ts)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo(tz))
+    return int(dt.timestamp())
+
+
+def _payload(axis: list[tuple], window: tuple[int, int], series: dict) -> dict:
+    """Wrap one window's series with its time axis, change-point encoded.
+
+    `updated` is the last pass time (= the real data refresh moment); using
     export-time now() would change the file on every export even outside the
     collection windows."""
-    ts_keep = [ts for ts, *_flags in axis[window[0]:window[1]]]
-    return {"updated": ts_keep[-1], "ts": ts_keep, "series": series}
+    rows = axis[window[0]:window[1]]
+    tz = _collection_tz()
+    mask = {key: [int(flag) for flag in col]
+            for key, col in zip(_MASKED, list(zip(*rows))[1:4])} if rows else {}
+    # a metric no pass in this window collected is dropped from every class
+    live = [key for key in _MASKED if any(mask.get(key, ()))]
+    encoded = {}
+    for cls, arrays in series.items():
+        entry = {}
+        for key in live:
+            enc = _cp_encode(_fill_masked(arrays[key], mask[key]))
+            if enc is not None:
+                entry[key] = enc
+        enc = _cp_encode(arrays["q"])
+        if enc is not None:
+            entry["q"] = enc
+        encoded[cls] = entry
+    return {"v": TREND_FORMAT, "updated": rows[-1][0], "tz": tz,
+            "t": [_epoch(ts, tz) for ts, *_flags in rows],
+            "m": {key: _cp_encode(mask[key]) for key in live},
+            "series": encoded}
+
+
+def decode_trend(payload: dict) -> dict:
+    """Expand a v2 payload back to dense per-pass arrays (tests, tooling).
+
+    Returns {"ts": [wall-clock ISO strings], "series": {cls: {a, c, e, q}}},
+    the shape v1 files carried."""
+    from zoneinfo import ZoneInfo
+
+    n = len(payload["t"])
+    tz = ZoneInfo(payload.get("tz") or "Asia/Seoul")
+    masks = {key: _cp_decode(payload["m"].get(key, 0), n) for key in _MASKED}
+    series = {}
+    for cls, entry in payload["series"].items():
+        out = {}
+        for key in _MASKED:
+            values = _cp_decode(entry.get(key), n)
+            out[key] = [v if on else None for v, on in zip(values, masks[key])]
+        out["q"] = _cp_decode(entry.get("q"), n)
+        series[cls] = out
+    ts = [datetime.fromtimestamp(t, tz).replace(tzinfo=None).isoformat()
+          for t in payload["t"]]
+    return {**{k: v for k, v in payload.items() if k not in ("t", "m", "series")},
+            "ts": ts, "series": series}
 
 
 def export_trend_archives(conn, t, out_dir: Path,
-                          window: int = TREND_WINDOW) -> int:
-    """Freeze the trend history that scrolled out of the live window.
+                          window: int | None = None) -> int:
+    """Freeze the trend history into fixed `window`-sized chunks.
 
-    The live trend file publishes only the newest `window` timestamps, so at a
-    10-minute cadence it covers barely two days; everything older is split
-    into fixed `window`-sized chunks (trend_<year>_<term>_w000.json, …) that
+    Everything is split into chunks (trend_<year>_<term>_w000.json, …) that
     the web UI can page through. A chunk is written once and then never
-    rewritten — its file existing means it is frozen — so the hourly publish
-    does not churn git history. The trailing partial chunk stays live-only.
+    rewritten — its file existing in the current format means it is frozen —
+    so a publish does not churn git history; a chunk left in the old dense
+    format is rewritten once. The trailing partial chunk is live-only, and the
+    live file also carries the newest complete chunk (see live_bounds), so the
+    UI pages through all but the last one.
     Returns the number of complete chunks (written or already present)."""
     axis = _load_axis(conn, t)
+    window = window or TREND_WINDOW   # read at call time: tests patch it
     complete = len(axis) // window
     if not complete:
         return 0
@@ -154,7 +266,7 @@ def export_trend_archives(conn, t, out_dir: Path,
     paths = {}
     for w in range(complete):
         path = out_dir / f"trend_{t['year']}_{t['term']}_w{w:03d}.json"
-        if not path.exists():
+        if not _is_current_trend(path):
             paths[f"w{w:03d}"] = (path, (w * window, (w + 1) * window))
     if paths:
         series = _walk_samples(conn, t, axis,
@@ -164,14 +276,37 @@ def export_trend_archives(conn, t, out_dir: Path,
     return complete
 
 
+def _is_current_trend(path: Path) -> bool:
+    """True when `path` exists and is already in TREND_FORMAT (checked from
+    the first bytes; v1 archives are 27 MB and not worth parsing)."""
+    try:
+        with path.open("rb") as fh:
+            return fh.read(16).startswith(b'{"v":%d,' % TREND_FORMAT)
+    except FileNotFoundError:
+        return False
+
+
+def live_bounds(total: int, window: int | None = None) -> tuple[int, int]:
+    """The live file's slice of a `total`-pass axis.
+
+    It starts at the newest COMPLETE chunk, so it always holds at least one
+    full window (never a two-pass stub right after a chunk boundary) and
+    never overlaps a chunk the UI pages to. v1 used the newest `window`
+    passes, which re-showed part of the last archive."""
+    window = window or TREND_WINDOW
+    complete = total // window
+    return ((complete - 1) * window if complete else 0, total)
+
+
 def export_trend(conn, t) -> dict | None:
-    """Compact enrollment time-series for one term: a shared `ts` axis plus per-class
-    aligned arrays (a=applied, c=cart, e=enrolled, q=quota; null for a metric the
-    pass did not collect). Returns None when the term has no passes yet."""
+    """Compact enrollment time-series for one term (payload format v2, see
+    _payload): the live window's passes plus each class's change points
+    (a=applied, c=cart, e=enrolled, q=quota). Returns None when the term has
+    no passes yet."""
     axis = _load_axis(conn, t)
     if not axis:
         return None
-    bounds = (max(0, len(axis) - TREND_WINDOW), len(axis))
+    bounds = live_bounds(len(axis))
     series = _walk_samples(conn, t, axis, {"live": bounds})["live"]
     out = _payload(axis, bounds, series)
     st = conn.execute("SELECT closed, forced_at FROM count_state WHERE year=? AND term=?",
@@ -198,6 +333,25 @@ def _write(path: Path, obj) -> int:
         except FileNotFoundError:
             pass
     return len(text.encode("utf-8"))
+
+
+def _write_stamped(path: Path, obj: dict, field: str = "generated") -> int:
+    """Write `obj` with `field` set to now — unless only that stamp would change.
+
+    explore-index.json is 4.5 MB and was re-committed on every publish although
+    between two publishes the ONLY difference was this timestamp: ~42% of the
+    web repository's growth for no content. Compare with the stamp neutralised
+    and keep the old file (and its stamp) when nothing else moved."""
+    try:
+        old = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        old = None
+    if isinstance(old, dict) and field in old:
+        # round-trip so tuples and lists compare as the JSON they become
+        new = json.loads(json.dumps(obj, ensure_ascii=False))
+        if {**old, field: ""} == {**new, field: ""}:
+            return path.stat().st_size
+    return _write(path, {**obj, field: _now_iso()})
 
 
 def select_term_codes(spec: str | None) -> list[str]:
@@ -577,7 +731,7 @@ def _export_explore(conn, terms, classes_dir_writer) -> None:
 
     explore = {
         "version": 1,
-        "generated": _now_iso(),
+        "generated": "",   # set by the writer: only when the content changed
         "strings": {"names": keys_in_order(name_intern),
                     "profs": [{"id": p["id"], "name": p["name"], "depts": sorted(p["depts"])}
                               for p in prof_rows],
@@ -627,9 +781,11 @@ def export_trend_only(conn, *, years: list[str] | None = None,
                 f"class index has no entry for {t['year']}/{t['term']}; run a full JSON export"
             )
         entry["trend"] = tfn
-        entry["trendArchives"] = export_trend_archives(conn, t, trend_dir)
+        # the newest complete chunk rides in the live file (live_bounds)
+        entry["trendArchives"] = max(
+            0, export_trend_archives(conn, t, trend_dir) - 1)
         written += 1
-        print(f"  {tfn}: {len(trend['series'])} classes × {len(trend['ts'])} samples"
+        print(f"  {tfn}: {len(trend['series'])} classes × {len(trend['t'])} passes"
               f" (+{entry['trendArchives']} archive windows)")
     _write(index_path, index)
     return written
@@ -676,8 +832,10 @@ def main(argv: list[str] | None = None) -> None:
                 tfn = f"trend_{t['year']}_{t['term']}.json"
                 tsize = _write(trend_dir / tfn, trend)
                 entry["trend"] = tfn   # client prefixes data/trend/
-                entry["trendArchives"] = export_trend_archives(conn, t, trend_dir)
-                print(f"  {tfn}: {len(trend['series'])} classes × {len(trend['ts'])} samples ({tsize // 1024} KB,"
+                # the newest complete chunk rides in the live file (live_bounds)
+                entry["trendArchives"] = max(
+                    0, export_trend_archives(conn, t, trend_dir) - 1)
+                print(f"  {tfn}: {len(trend['series'])} classes × {len(trend['t'])} passes ({tsize // 1024} KB,"
                       f" +{entry['trendArchives']} archive windows)")
             index_terms.append(entry)
             total += len(rows)
@@ -693,7 +851,8 @@ def main(argv: list[str] | None = None) -> None:
         _write(classes_dir / "index.json", meta)
         print(f"wrote {len(index_terms)} term files + index.json "
               f"({total} classes) to {classes_dir}")
-        _export_explore(conn, terms, lambda obj: _write(OUT / "explore-index.json", obj))
+        _export_explore(conn, terms,
+                        lambda obj: _write_stamped(OUT / "explore-index.json", obj))
     finally:
         conn.close()
 

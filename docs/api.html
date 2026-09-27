@@ -101,10 +101,31 @@ curl 'http://127.0.0.1:8011/api/search?name=경제&level=학사&day=0'</code></p
   <p>The static frontend treats its JSON files and browser-imported files as data
      interfaces, not as arbitrary JavaScript. The catalog index validates term
      identities and JSON filenames; class rows validate their scalar fields,
-     nullable counts, classifications, and meeting slots; trend data requires
-     date strings plus integer-or-null metric arrays whose lengths match
-     <code>ts</code>. The explorer and graduation indexes validate their
+     nullable counts, classifications, and meeting slots; trend data (format
+     <code>v: 2</code>) requires rising integer epoch seconds in <code>t</code>
+     and well-formed change-point encodings (integer indices below
+     <code>t.length</code>, integer-or-null values) for the pass mask and every
+     class metric. The explorer and graduation indexes validate their
      cross-reference types before building maps.</p>
+  <h3 id="trend-format">Trend payload (v2, since 2026-09-27)</h3>
+  <p><code>data/trend/trend_&lt;year&gt;_&lt;term&gt;.json</code> (the live window)
+     and its frozen chunks <code>…_wNNN.json</code> share one shape:</p>
+  <pre><code>{"v": 2, "updated": "2026-09-27T22:02:31", "tz": "Asia/Seoul",
+ "t": [1790..., ...],                 <span class="cmt">// pass times, epoch seconds</span>
+ "m": {"a": 1, "e": 1},               <span class="cmt">// metrics each pass collected</span>
+ "series": {"M1522.000900(001)": {"a": [0, 12, 57, 13], "e": 12, "q": 30}}}</code></pre>
+  <p>Each series value is a change-point list: absent/<code>null</code> = every pass
+     null, an integer = constant, <code>[i0, v0, i1, v1, …]</code> = <code>v_k</code>
+     from pass <code>i_k</code> until the next index. The decoder nulls a value whose
+     pass did not collect that metric (<code>m</code>, same encoding over 0/1;
+     quota is always collected), and a metric no pass in the window collected is
+     omitted everywhere. Times are absolute and labelled in <code>tz</code>, so the
+     chart reads KST in any browser; its x axis is time, and a collection gap
+     longer than three hours breaks the line. The live file starts at the newest
+     complete 240-pass chunk, so it never overlaps a chunk the UI pages to
+     (<code>trendArchives</code> in the class index counts the chunks before it).
+     The dense v1 files were ~27 MB each; v2 windows are ~0.34 MB (46 KB gzipped).
+     <code>export_json.decode_trend()</code> expands a payload back to dense arrays.</p>
   <p>A malformed term file is isolated to that term and contributes no search
      rows. A malformed trend, explorer, or graduation payload fails only its
      feature and shows the feature's fallback state. Invalid imported timetable

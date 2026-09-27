@@ -40,8 +40,8 @@ next GitHub Actions runner pass.
 | 6 | Turso: `classes(year, term)` index, keyframe partial index, bootstrap copies only the latest keyframe | done |
 | 7 | Turso: `count_samples` UNIQUE key, `INSERT OR IGNORE` push/pull, pull reuses `db.fold_pass_into_latest` | done |
 | 8 | Keyframe pushes only changed `count_latest` rows | done (keyframe push pending runner verification ~2026-09-28 13:12 KST) |
-| 9 | Export: stop rewriting unchanged files (`generated` churn) | pending |
-| 10 | Trend change-point format + client decoder, LRU window cache, time-based X axis, KST timestamps | pending |
+| 9 | Export: stop rewriting unchanged files (`generated` churn) | done |
+| 10 | Trend change-point format + client decoder, LRU window cache, time-based X axis, KST timestamps | done |
 | 11 | Client boot: cacheable assets, parallel partials, `loadMore` sort cache | pending |
 | 12 | Features: share URLs + detail→trend, change feed, vacancy alerts, dark mode + a11y | pending |
 | 13 | Ops: publish timer 06/12/18, `OnFailure` → GitHub issue, `TimeoutStartSec`, weekly backup | pending |
@@ -104,3 +104,26 @@ next GitHub Actions runner pass.
 - Pending: the first scheduled keyframe on the runner after deployment
   (~2026-09-28 13:12 KST) should log `push: … latest:` in single or double
   digits rather than 8,652.
+
+### Items 9–10: export churn, trend v2 (2026-09-27)
+
+- Full export from the real catalog into a scratch directory: the 17 trend
+  files went from ~460 MB to **7.9 MB**; the live file from 27.35 MB to
+  343 KB (46 KB gzipped, was 189 KB). Export took 100 s → 82 s.
+- Lossless: every window (16 archives + live) was re-derived with
+  `_walk_samples` and compared with `decode_trend(_payload(...))` — 18
+  windows, 0 mismatches, timestamps included. Against the frozen v1 files,
+  w000/w007/w015 decode identically; w001 differs for one class
+  (M3239.002000(015)) because that v1 file was generated from dense storage
+  before the 2026-09-04 delta migration, which reads a class missing from a
+  pass as "unchanged" rather than null — not an encoding difference.
+- Found while exporting: `idx_classes_term` changed the order of rows that
+  tie on (name, lt_no), rewriting all 28 term files with no content change.
+  `db.search` now breaks ties explicitly (sbjt_cd, subh_cd, id — the order
+  the old index delivered); re-export leaves every old term byte-identical.
+- `explore-index.json`: content-identical re-export keeps the committed file
+  and its `generated` stamp (verified by restoring it from git and exporting).
+- Web: `web/tests` 16/16 pass (the two trend-window tests had been timing
+  out on the 27 MB files). Screenshots with the browser in Europe/London show
+  KST labels and tooltips, a time-scaled x axis where the 08-12~08-27 gap in
+  w001 takes its real width, and paging back 15 windows leaves 4 in memory.

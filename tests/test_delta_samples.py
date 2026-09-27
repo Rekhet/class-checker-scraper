@@ -125,7 +125,7 @@ class TrendForwardFillTests(unittest.TestCase):
         _set(conn, "M200", enrolled=11)
         db.sample_counts(conn, [(YEAR, TERM)], ts=TS(20), collect_cart=False)
 
-        trend = export_json.export_trend(conn, self.TERM_ROW)
+        trend = export_json.decode_trend(export_json.export_trend(conn, self.TERM_ROW))
 
         self.assertEqual(trend["ts"], [TS(0), TS(10), TS(20)])
         self.assertEqual(trend["updated"], TS(20))
@@ -142,7 +142,7 @@ class TrendForwardFillTests(unittest.TestCase):
         db.sample_counts(conn, [(YEAR, TERM)], ts=TS(10), collect_cart=False,
                          collect_enrolled=True)
 
-        trend = export_json.export_trend(conn, self.TERM_ROW)
+        trend = export_json.decode_trend(export_json.export_trend(conn, self.TERM_ROW))
 
         self.assertEqual(trend["series"]["M100(001)"]["c"], [12, None])
         self.assertEqual(trend["series"]["M100(001)"]["e"], [None, 10])
@@ -161,8 +161,8 @@ class TrendForwardFillTests(unittest.TestCase):
                 complete = export_json.export_trend_archives(
                     conn, self.TERM_ROW, out, window=2)
                 import json
-                second = json.loads(
-                    (out / f"trend_{YEAR}_{TERM}_w001.json").read_text())
+                second = export_json.decode_trend(json.loads(
+                    (out / f"trend_{YEAR}_{TERM}_w001.json").read_text()))
 
         self.assertEqual(complete, 2)
         # window 1 contains no samples at all; its values are forward-filled
@@ -196,14 +196,14 @@ class TombstoneTests(unittest.TestCase):
 
         # its history stays (it really was there at T1000) but the series
         # stops instead of being forward-filled forever
-        trend = export_json.export_trend(conn, self.TERM_ROW)
+        trend = export_json.decode_trend(export_json.export_trend(conn, self.TERM_ROW))
         self.assertEqual(trend["series"]["M200(002)"]["e"], [10, None])
         self.assertEqual(trend["series"]["M100(001)"]["e"], [10, 10])
 
         # a window that starts after the retirement does not mention it at all
         db.sample_counts(conn, [(YEAR, TERM)], ts=TS(20), collect_cart=False)
         with unittest.mock.patch.object(export_json, "TREND_WINDOW", 1):
-            later = export_json.export_trend(conn, self.TERM_ROW)
+            later = export_json.decode_trend(export_json.export_trend(conn, self.TERM_ROW))
         self.assertEqual(later["ts"], [TS(20)])
         self.assertNotIn("M200(002)", later["series"])
 

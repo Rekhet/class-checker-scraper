@@ -1157,7 +1157,12 @@ def search(conn: sqlite3.Connection, *, limit: int | None = 500,
     """Filter classes (term+year pin one semester). limit=None returns every match
     (export); offset paginates. Accepts the same filter kwargs as _search_where."""
     clause, params = _search_where(**filters)
-    sql = "SELECT * FROM classes c" + clause + " ORDER BY c.name, c.lt_no"
+    # Explicit tie-break (same name and section): without it the order of
+    # equal rows followed the query plan, and adding idx_classes_term
+    # reshuffled every exported term file with no content change. sbjt_cd,
+    # subh_cd is the order the UNIQUE index used to deliver them in.
+    sql = ("SELECT * FROM classes c" + clause
+           + " ORDER BY c.name, c.lt_no, c.sbjt_cd, c.subh_cd, c.id")
     if limit is not None:
         sql += " LIMIT ? OFFSET ?"; params += [limit, offset]
     elif offset:
