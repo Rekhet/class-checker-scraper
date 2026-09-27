@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress. Started 2026-09-27 from a read-only audit of the collector,
+Done except the pending checks listed at the end. Started 2026-09-27 from a read-only audit of the collector,
 export/web, and operations. Each item below is committed separately, measured
 against real data (not only unit tests), and pushed only after the measurement
 shows no regression. Items touching the collector are verified against the
@@ -48,7 +48,7 @@ next GitHub Actions runner pass.
 | 14 | CI: test workflow, `dev` extra with pytest | done |
 | 15 | Docs drift fixes and a semester rollover checklist | done |
 | 16 | Cleanup: disable finished-window units, move unused files to attic | done |
-| 17 | Experiment: requests-only session mint with Playwright fallback | pending |
+| 17 | Experiment: requests-only session mint with Playwright fallback | not pursued (see log) |
 
 ## Verification log
 
@@ -197,3 +197,21 @@ next GitHub Actions runner pass.
 - Side effect to note: `systemctl --user reset-failed` was run without a unit
   name and also cleared the failed flag of two unrelated user units
   (`snu-feed.service`, an IBus service); their journals are unchanged.
+
+### Item 17: requests-only session mint — not pursued (2026-09-27)
+
+One plain GET of the sugang entry page showed it runs `NetFunnel_Action`
+(the site's traffic-queue system) before a session is usable. Playwright
+executes that page as a browser would; minting cookies with plain requests
+would skip the queue, i.e. sidestep the site's own load control during
+registration peaks, and risk an IP block for the collector. The saving
+would also be small: on the runner the cached Chromium install step takes
+~1 s and the collect step is dominated by 866 page requests. Kept as is.
+
+## Pending live checks
+
+- First scheduled keyframe on the runner after 975ff7e (≈2026-09-28 13:12
+  KST): its log should show `push: … latest:` in single or double digits,
+  not 8,652.
+- First scheduled 06:00 publish (2026-09-28) under the new timer.
+- First scheduled weekly backup (2026-10-04 04:30).
