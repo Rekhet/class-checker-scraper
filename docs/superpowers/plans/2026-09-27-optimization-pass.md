@@ -42,7 +42,7 @@ next GitHub Actions runner pass.
 | 8 | Keyframe pushes only changed `count_latest` rows | done (keyframe push pending runner verification ~2026-09-28 13:12 KST) |
 | 9 | Export: stop rewriting unchanged files (`generated` churn) | done |
 | 10 | Trend change-point format + client decoder, LRU window cache, time-based X axis, KST timestamps | done |
-| 11 | Client boot: cacheable assets, parallel partials, `loadMore` sort cache | pending |
+| 11 | Client boot: cacheable assets, parallel partials, `loadMore` sort cache | done (catalog slimming deferred, see log) |
 | 12 | Features: share URLs + detail→trend, change feed, vacancy alerts, dark mode + a11y | pending |
 | 13 | Ops: publish timer 06/12/18, `OnFailure` → GitHub issue, `TimeoutStartSec`, weekly backup | pending |
 | 14 | CI: test workflow, `dev` extra with pytest | pending |
@@ -127,3 +127,18 @@ next GitHub Actions runner pass.
   out on the 27 MB files). Screenshots with the browser in Europe/London show
   KST labels and tooltips, a time-scaled x axis where the 08-12~08-27 gap in
   w001 takes its real width, and paging back 15 windows leaves 4 in memory.
+- Deployed: web b21e92e/ea598a3 built on GitHub Pages 2026-09-27; the live
+  site (browser in America/Los_Angeles) loads the v2 live file (50 KB
+  gzipped on the wire), labels KST, pages to the previous window, 0 errors.
+
+### Item 11: client boot and search (2026-09-27)
+
+- Repeat visit on the deployed site: app.js 60,809 B → 114 B (revalidated
+  304); partials 90–137 B each; partials and app.js now fetched together.
+- `searchLocal` result cache (full catalog, seats filter over all years,
+  38,834 rows): five "더 보기" pages 154 ms → 0 ms; a name query plus five
+  pages 540 ms → 109 ms. Full result order identical to the previous build
+  for three queries (38,834 / 1,338 / 1 rows).
+- Deferred: columnar/slim catalog files. The wire saving is ~23% (373 KB →
+  286 KB gzipped for 2026-2) while every consumer of `termRows` reads the row
+  objects; not worth the risk in this pass.
