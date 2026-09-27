@@ -22,9 +22,10 @@ import sys
 from pathlib import Path
 
 try:
-    from . import db
+    from . import db, roster_drift
 except ImportError:  # pragma: no cover - direct script execution
     import db  # type: ignore[no-redef]
+    import roster_drift  # type: ignore[no-redef]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DEST = PROJECT_ROOT / "data" / "turso.db"
@@ -137,16 +138,16 @@ def main(argv: list[str] | None = None) -> int:
 
     src = libsql.connect(url, auth_token=token)
     dst = libsql.connect(str(args.dest))
-    # INSERT OR IGNORE only dedupes against a UNIQUE key; upgrade a catalog
-    # created before idx_samples_key became unique (a one-time rebuild).
-    if db.ensure_sample_key_unique(dst):
-        dst.commit()
-        print("upgraded idx_samples_key to UNIQUE")
+    # Current schema on the local catalog: roster_drift, and idx_samples_key as
+    # UNIQUE (INSERT OR IGNORE only dedupes against a unique key).
+    db.init_schema(db._Conn(dst, "libsql"))
     since = None if args.full else _read_state()
     out = merge_samples(src, dst, since_ts=since)
     _write_state(out["max_ts"])
+    drift_rows = roster_drift.sync(src, dst)   # a handful of rows; see roster_drift
     print(f"pulled {out['rows']} rows, inserted {out['inserted']}, "
-          f"{out['passes']} passes, cursor {out['max_ts'] or '-'}")
+          f"{out['passes']} passes, cursor {out['max_ts'] or '-'}, "
+          f"{drift_rows} drift row(s)")
     return 0
 
 

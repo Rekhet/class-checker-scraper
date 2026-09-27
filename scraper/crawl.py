@@ -367,7 +367,9 @@ def refresh_counts(conn, client: SnuClient, year: str, term: str, *,
         log.warning("live count overlay left %d/%d classes unmatched for %s",
                     unmatched, len(fetched), term)
     return {"term": term, "fetched": len(fetched), "updated": updated,
-            "unmatched": unmatched}
+            "unmatched": unmatched,
+            # the live roster's stable identities, for catalog drift detection
+            "live_keys": sorted({(c["sbjt_cd"], c["lt_no"]) for c in fetched})}
 
 
 # 성적부여형태 (MRKS_GV_MTHD) codes from cc100ajax STRINGCOMMONCODE. A~F + S/U +
@@ -665,12 +667,14 @@ def refresh_counts_all(conn, years: list[str], terms: list[str] | None = None, *
     plan = [p for y in years for p in client.fetch_terms(y)
             if not wanted or p["term"] in wanted]
     total = 0
+    live_keys: dict[str, list] = {}
     for p in plan:
         out = refresh_counts(conn, client, p["year"], p["term"],
                              label=p["label"], progress=progress,
                              collect_cart=collect_cart,
                              collect_enrollment=collect_enrollment)
         total += out["updated"]
+        live_keys[p["term"]] = out.get("live_keys", [])
     # append one enrollment sample per class for the 인원 추이 time-series
     samples = 0
     try:
@@ -686,7 +690,8 @@ def refresh_counts_all(conn, years: list[str], terms: list[str] | None = None, *
         if strict_sampling:
             raise
         log.exception("count sampling failed")
-    return {"updated": total, "samples": samples, "terms": [p["term"] for p in plan]}
+    return {"updated": total, "samples": samples, "terms": [p["term"] for p in plan],
+            "live_keys": live_keys}
 
 
 def refresh_grading_all(conn, years: list[str], terms: list[str] | None = None, *,

@@ -133,6 +133,23 @@ CREATE TABLE IF NOT EXISTS count_state (
     PRIMARY KEY (year, term)
 );
 
+-- Catalog drift seen by the collector: live classes missing from the catalog
+-- (added) and catalog classes gone from the live search (removed), one row per
+-- distinct difference. handled_at is set locally once a crawl answered it.
+-- See scraper/roster_drift.py.
+CREATE TABLE IF NOT EXISTS roster_drift (
+    year       TEXT NOT NULL,
+    term       TEXT NOT NULL,
+    signature  TEXT NOT NULL,
+    added      TEXT NOT NULL,       -- JSON list of "SBJT(LT)"
+    removed    TEXT NOT NULL,
+    first_seen TEXT NOT NULL,
+    last_seen  TEXT NOT NULL,
+    passes     INTEGER NOT NULL DEFAULT 1,
+    handled_at TEXT,
+    PRIMARY KEY (year, term, signature)
+);
+
 CREATE INDEX IF NOT EXISTS idx_classes_name ON classes(name);
 CREATE INDEX IF NOT EXISTS idx_classes_prof ON classes(professor);
 CREATE INDEX IF NOT EXISTS idx_classes_dept ON classes(department);

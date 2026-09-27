@@ -32,10 +32,11 @@ import sys
 from pathlib import Path
 
 try:
-    from . import crawl, db
+    from . import crawl, db, roster_drift
 except ImportError:  # pragma: no cover - direct script execution
     import crawl  # type: ignore[no-redef]
     import db  # type: ignore[no-redef]
+    import roster_drift  # type: ignore[no-redef]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCRATCH = PROJECT_ROOT / "data" / "cloud-collect.db"
@@ -237,6 +238,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"skipped: {out['skipped']}")
         return 0
     print(f"coverage: {check_coverage(out, counts['classes']):.2%}", flush=True)
+    # Catalog drift: live classes the seeded roster lacks, and roster classes
+    # the live search no longer has. Recorded for the local update, which
+    # re-crawls the catalog only for a persistent drift after registration.
+    roster = local.execute("SELECT sbjt_cd, lt_no FROM classes WHERE year=? AND term=?",
+                           (args.year, term)).fetchall()
+    added, removed = roster_drift.compare(roster, out.get("live_keys", {}).get(term, []))
+    pass_ts = local.execute("SELECT MAX(ts) FROM count_passes").fetchone()[0]
+    print(f"drift: +{len(added)} {added[:5]} / -{len(removed)} {removed[:5]}", flush=True)
     if args.dry_run:
         n = local.execute("SELECT COUNT(*) FROM count_samples").fetchone()[0]
         local.close()
@@ -245,6 +254,9 @@ def main(argv: list[str] | None = None) -> int:
 
     remote = _remote_connect()
     pushed = push_samples(local, remote, skip_pass_ts=bootstrapped_passes)
+    if roster_drift.record(remote, year=args.year, term=term, added=added,
+                           removed=removed, ts=pass_ts):
+        remote.commit()
     remote.close()
     local.close()
     print(f"push: {pushed}")
