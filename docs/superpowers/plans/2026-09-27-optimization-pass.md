@@ -262,3 +262,35 @@ would also be small: on the runner the cached Chromium install step takes
   1,663, 5,249 rows; all: 30, 92, 181, 869, 1,738, 7,131). A test also
   matches every row (time, class, seats before/after) against an
   independent computation.
+
+### Follow-up batch (2026-09-28): scope, drift, mobile, alerts, tests, harness
+
+- Export scope: scheduled runs export only the collected term
+  (`--current`); the live trend resumes from a checkpoint in
+  `data/trend_cache/` (59 s full replay → 2.3 s, identical output). A real
+  `update.sh` run: ~45 s → 19 s. Measured split before: classes 1.6 s,
+  explore 3.3 s, trend ~28 s of every run.
+- Catalog drift: the collector records live/catalog differences
+  (`roster_drift`, cloud table created before the push); `update.sh` crawls,
+  re-seeds the term's cloud roster and marks it handled only for a
+  persistent (≥3 passes), unhandled drift after the last registration/change
+  window. First runner pass on 808bd0b recorded +2 (`375.803(042)`,
+  `552.439(002)`); marked handled as the baseline (owner: no crawl this
+  semester). `reseed-check` on real data: 8,652 classes / 7,898 slots,
+  identical to local, 0.2 s.
+- Mobile (iPhone 13, light/dark, local and deployed): 0 px horizontal
+  overflow on every page; chart drawn at screen width (axis labels ~4 px →
+  readable), tap/drag tooltip, theme toggle beside the title. Found and
+  fixed: a route change left an open detail drawer covering the page.
+- Alerts: watch every bookmarked class at once; option to skip classes on
+  or clashing with the timetable (recorded, shown, not announced); clear all.
+- Tests: server API (search, lookup, status, path traversal, curated write +
+  token), changelog diff/log, CSV/XLSX export, drift/reseed/update hook,
+  checkpoint, mobile, alert extensions, and a graduation-audit golden
+  snapshot (200 specs × 4 synthetic transcripts; the "graduate" transcript
+  passes for 138; the rest trace to catalog availability, and the three
+  with no failing bar are the 수리통계 대체 rule shown as a ⚠ warning, not a
+  bug). Coverage: server 32→59%, changelog 33→92%, export 29→97%;
+  tests/ 211 passed, web/tests 34 passed.
+- Harness: `python -m tools.measure` (11 read-only commands) replaces the
+  ad-hoc scripts used in this pass; documented in maintenance.html.

@@ -232,6 +232,31 @@ curl -s http://127.0.0.1:8011/api/status | python3 -m json.tool</code></pre>
   <p><code>/api/status</code> returns the active <code>backend</code>, row counts, the last
      crawl run, and live refresh progress — the quickest signal that things are healthy.</p>
 
+  <h2 id="measure">Measurement harness</h2>
+  <p><code>python -m tools.measure &lt;command&gt;</code> re-runs the real-data checks
+     used to verify changes (all read-only toward the cloud database and the site;
+     cloud commands need <code>turso-remote.env</code> sourced, web commands serve
+     <code>web/</code> locally unless <code>--site URL</code> names the deployed site):</p>
+  <div class="table-wrap"><table>
+    <tr><th>Command</th><th>What it shows</th></tr>
+    <tr><td><code>site</code></td><td>Trend page loads, KST labels in a foreign time zone, window paging, feed, page errors</td></tr>
+    <tr><td><code>mobile</code></td><td>Phone viewport, light and dark: horizontal overflow, chart label size, tap tooltip</td></tr>
+    <tr><td><code>feed [--sequential]</code></td><td>Cold-cache change-feed load per period (3/7/14 days, semester)</td></tr>
+    <tr><td><code>revisit</code></td><td>Bytes of each asset on a first and a repeat visit</td></tr>
+    <tr><td><code>search [--ref]</code></td><td><code>searchLocal</code> timings, working tree vs a web/ git ref</td></tr>
+    <tr><td><code>trend-lossless</code></td><td>Every trend window's v2 payload decodes to the dense replay</td></tr>
+    <tr><td><code>trend-checkpoint</code></td><td>Checkpointed live trend vs full replay: time and equality</td></tr>
+    <tr><td><code>export-profile</code></td><td>Time per export phase</td></tr>
+    <tr><td><code>cloud</code></td><td>Cloud row counts, duplicate sample keys, roster query plan, indexes, recent drift</td></tr>
+    <tr><td><code>latest-compare</code></td><td>Cloud vs local <code>count_latest</code> for the collected term</td></tr>
+    <tr><td><code>reseed-check</code></td><td>Runs <code>reseed_roster</code> into a scratch copy of the cloud roster and compares</td></tr>
+  </table></div>
+  <p>The graduation audit has a characterization snapshot:
+     <code>web/tests/test_grad_golden.py</code> runs it for every spec on four synthetic
+     transcripts and compares pass/fail and every figure with
+     <code>web/tests/golden/grad_audit.json</code>; accept an intended change with
+     <code>UPDATE_GOLDEN=1</code> and review the JSON diff.</p>
+
   <h2 id="trouble">Troubleshooting</h2>
   <div class="table-wrap"><table>
     <tr><th>Symptom</th><th>Cause &amp; fix</th></tr>
