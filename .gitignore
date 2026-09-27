@@ -51,3 +51,12 @@ __pycache__/
 # Remote Turso credentials for the cloud counts pull (never commit).
 /turso-remote.env
 /data/pull_counts.state
+
+# backups/ is tracked for its README and sample exports, so anything dropped
+# there by hand — an old credential file, a database copy made during
+# recovery — has to be excluded explicitly. This repository is public.
+/backups/*.env
+/backups/*.env.*
+/backups/*.db
+/backups/*.db-*
+/backups/*.sqlite*
