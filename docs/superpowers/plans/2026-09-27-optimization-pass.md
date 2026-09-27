@@ -248,3 +248,17 @@ would also be small: on the runner the cached Chromium install step takes
   14d 354–611 ms; parallel 3d 55–81 ms, 7d 70–115 ms, 14d 169–182 ms,
   semester 553–586 ms.
 - Also: the header title links to the site root (`./`), clearing any route.
+
+### Follow-up: feed rows independent of the period (2026-09-28, web 02147b0)
+
+- Owner report: the newest rows changed with the period chosen. Cause: rows
+  were the net difference from the period's start, and '여석이 생긴 강좌' was
+  ranked by that gain; a class could also drop out of a longer period
+  (5 → 3 → 4 grew over 3 h, fell over 24 h).
+- Now each row is the class's newest qualifying step between two consecutive
+  passes, newest first; the period only bounds how far back it may lie.
+  Checked on the deployed site: for 3 h / 24 h / 3 d / 7 d / 14 d / semester
+  each shorter list is exactly the head of the next (open: 30, 92, 180, 813,
+  1,663, 5,249 rows; all: 30, 92, 181, 869, 1,738, 7,131). A test also
+  matches every row (time, class, seats before/after) against an
+  independent computation.
