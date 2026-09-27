@@ -130,3 +130,20 @@ class EncodingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ArchiveIndexTests(unittest.TestCase):
+    def test_index_lists_each_navigable_chunk_start(self) -> None:
+        from scraper.export_json import trend_archive_index
+
+        # 740 passes: chunks w000..w002 complete, w002 rides in the live file
+        out = trend_archive_index(_conn(740), TERM, window=240)
+        self.assertEqual(out["trendArchives"], 2)
+        base = 1785769200                     # 2026-08-04T00:00 Asia/Seoul
+        self.assertEqual(out["trendArchiveStarts"], [base, base + 240 * 60])
+
+    def test_no_complete_chunk_means_no_archives(self) -> None:
+        from scraper.export_json import trend_archive_index
+
+        self.assertEqual(trend_archive_index(_conn(100), TERM, window=240),
+                         {"trendArchives": 0, "trendArchiveStarts": []})

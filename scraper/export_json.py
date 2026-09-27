@@ -276,6 +276,22 @@ def export_trend_archives(conn, t, out_dir: Path,
     return complete
 
 
+def trend_archive_index(conn, t, window: int | None = None) -> dict:
+    """The class-index fields that point the UI at a term's archive chunks.
+
+    trendArchives counts the chunks before the live file (the newest complete
+    chunk rides in it, see live_bounds). trendArchiveStarts gives each one's
+    first pass time (epoch seconds), so the client can tell which chunks a
+    period needs and fetch them all at once instead of one by one.
+    """
+    window = window or TREND_WINDOW
+    axis = _load_axis(conn, t)
+    count = max(0, len(axis) // window - 1)
+    tz = _collection_tz()
+    return {"trendArchives": count,
+            "trendArchiveStarts": [_epoch(axis[w * window][0], tz) for w in range(count)]}
+
+
 def _is_current_trend(path: Path) -> bool:
     """True when `path` exists and is already in TREND_FORMAT (checked from
     the first bytes; v1 archives are 27 MB and not worth parsing)."""
@@ -781,9 +797,8 @@ def export_trend_only(conn, *, years: list[str] | None = None,
                 f"class index has no entry for {t['year']}/{t['term']}; run a full JSON export"
             )
         entry["trend"] = tfn
-        # the newest complete chunk rides in the live file (live_bounds)
-        entry["trendArchives"] = max(
-            0, export_trend_archives(conn, t, trend_dir) - 1)
+        export_trend_archives(conn, t, trend_dir)
+        entry.update(trend_archive_index(conn, t))
         written += 1
         print(f"  {tfn}: {len(trend['series'])} classes × {len(trend['t'])} passes"
               f" (+{entry['trendArchives']} archive windows)")
@@ -832,9 +847,8 @@ def main(argv: list[str] | None = None) -> None:
                 tfn = f"trend_{t['year']}_{t['term']}.json"
                 tsize = _write(trend_dir / tfn, trend)
                 entry["trend"] = tfn   # client prefixes data/trend/
-                # the newest complete chunk rides in the live file (live_bounds)
-                entry["trendArchives"] = max(
-                    0, export_trend_archives(conn, t, trend_dir) - 1)
+                export_trend_archives(conn, t, trend_dir)
+                entry.update(trend_archive_index(conn, t))
                 print(f"  {tfn}: {len(trend['series'])} classes × {len(trend['t'])} passes ({tsize // 1024} KB,"
                       f" +{entry['trendArchives']} archive windows)")
             index_terms.append(entry)
