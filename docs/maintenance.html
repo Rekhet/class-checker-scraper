@@ -257,6 +257,8 @@ curl -s http://127.0.0.1:8011/api/status | python3 -m json.tool</code></pre>
         <td>The live search returned far less than the seeded roster (maintenance page, changed markup, IP block); the pass is discarded rather than recorded. Threshold <code>COUNT_MIN_COVERAGE</code> (default 0.95). A healthy pass prints <code>coverage: 100.00%</code>. Reproduce without writing anything: <code>python -m scraper.cloud_collect --year … --semester … --dry-run</code> with <code>turso-remote.env</code> sourced.</td></tr>
     <tr><td>GitHub issue <code>ops-alert: &lt;unit&gt; failed</code></td>
         <td>A scheduled update or backup failed. The issue holds only the time, result and the path of the local log (<code>data/logs/failures/</code>); read that file, fix, then close the issue. Further failures of the same unit comment on the open issue.</td></tr>
+    <tr><td>The update log shows <code>catalog drift …: crawling</code></td>
+        <td>The collector saw classes appear in or vanish from the live search for several passes after the registration periods, so the run re-crawled the term and re-seeded the cloud roster (systemd/README.md → Catalog drift re-crawl). <code>python -m scraper.roster_drift --year … --semester … --check</code> explains the current decision.</td></tr>
     <tr><td>Port already in use</td>
         <td>Another server instance is running — change <code>PORT</code> or stop the old process.</td></tr>
   </table></div>

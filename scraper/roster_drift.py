@@ -156,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--semester", required=True, choices=sorted(TERM_CODES))
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--check", action="store_true",
-                   help="print 'crawl' or 'none' (reason on stderr)")
+                   help="print 'crawl <signature>' or 'none' (reason on stderr)")
     g.add_argument("--mark-handled", metavar="SIGNATURE")
     args = ap.parse_args(argv)
     term = TERM_CODES[args.semester]
@@ -164,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.check:
             d = decide(conn, year=args.year, term=term)
-            print("crawl" if d["crawl"] else "none")
+            print(f"crawl {d['signature']}" if d["crawl"] else "none")
             print(f"roster drift: {json.dumps(d, ensure_ascii=False)}", file=sys.stderr)
         else:
             mark_handled(conn, year=args.year, term=term, sig=args.mark_handled,

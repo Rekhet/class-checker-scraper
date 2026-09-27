@@ -83,6 +83,32 @@ elif [ "$UPDATE_CRAWL" != "1" ]; then
   echo "warn: turso-remote.env is missing; publishing whatever is already local" >&2
 fi
 
+# Catalog drift (scraper/roster_drift.py): the collector records live classes
+# the catalog lacks and catalog classes gone from the live search. Once the
+# registration/change periods are over, a persistent, not-yet-handled drift
+# re-crawls the collected term, re-seeds its cloud roster, and marks the drift
+# handled; otherwise the catalog is left alone. A failed attempt is retried
+# next run and fails this one at the end (alert).
+DRIFT_FAILED=0
+if [ "$UPDATE_CRAWL" != "1" ] && [ "$PULL_FAILED" = "0" ] && [ -f "$ROOT/turso-remote.env" ]; then
+  decision="$("$PY" -m scraper.roster_drift --year "$UPDATE_YEAR" --semester "$UPDATE_SEM" --check)" \
+    || decision="none"
+  read -r drift_action drift_sig <<<"$decision"
+  if [ "$drift_action" = "crawl" ]; then
+    echo "catalog drift $drift_sig: crawling $UPDATE_YEAR $UPDATE_SEM"
+    if make refresh YEAR="$UPDATE_YEAR" SEM="$UPDATE_SEM" COLLECT="catalog,enrollment,grading" \
+        && ( set -a; . "$ROOT/turso-remote.env"; set +a
+             "$PY" -m scraper.reseed_roster --year "$UPDATE_YEAR" --semester "$UPDATE_SEM" ) \
+        && "$PY" -m scraper.roster_drift --year "$UPDATE_YEAR" --semester "$UPDATE_SEM" \
+             --mark-handled "$drift_sig"; then
+      UPDATE_CRAWL=1          # the catalog moved: export every term below
+    else
+      DRIFT_FAILED=1
+      echo "warn: catalog drift crawl failed; it is retried next run" >&2
+    fi
+  fi
+fi
+
 # Copy the newest sample onto the catalog's volatile columns: the static export
 # reads them off `classes`, which no longer moves on its own without a crawl.
 # With no fresh input this run, ask it to report staleness as an exit code.
@@ -109,6 +135,10 @@ YEAR="$UPDATE_YEAR" SEM="$UPDATE_SEM" EXPORT_SCOPE="$EXPORT_SCOPE" \
 PUBLISH_COMMIT_MESSAGE="${PUBLISH_COMMIT_MESSAGE:-chore(data): update}" \
   "$ROOT/scripts/publish.sh" full
 
+if [ "$DRIFT_FAILED" = "1" ]; then
+  echo "error: published, but the catalog drift crawl failed" >&2
+  exit 1
+fi
 if [ "$SYNC_STALE" = "1" ]; then
   echo "error: published, but no fresh counts arrived and the collection window is open" >&2
   exit 1

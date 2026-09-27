@@ -359,6 +359,52 @@ class PublishScriptTests(unittest.TestCase):
                              "refresh YEAR=2099 SEM=spring "
                              "COLLECT=catalog,enrollment,grading")
 
+    def _drift_python(self, env, project, *, make_fails: bool = False):
+        """A python stub that reports a due drift crawl and logs every call."""
+        calls = project / "py.log"
+        fake = project / "bin" / "python"
+        _executable(fake,
+                    "#!/bin/sh\n"
+                    f"printf '%s\\n' \"$*\" >> '{calls}'\n"
+                    'case "$*" in *roster_drift*--check*) echo "crawl sig123";; esac\n'
+                    "exit 0\n")
+        if make_fails:
+            _executable(project / "bin" / "make",
+                        "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$MAKE_LOG\"\nexit 1\n")
+        env["PY"] = str(fake)
+        return calls
+
+    def test_due_catalog_drift_crawls_reseeds_and_marks_it_handled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run, env, make_log = self._full_update_sandbox(tmp, remote_env=True)
+            calls = self._drift_python(env, Path(tmp))
+
+            result = run()
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(make_log.read_text(encoding="utf-8").strip(),
+                             "refresh YEAR=2099 SEM=spring COLLECT=catalog,enrollment,grading")
+            log = calls.read_text(encoding="utf-8")
+            self.assertIn("-m scraper.reseed_roster --year 2099 --semester spring", log)
+            self.assertIn("--mark-handled sig123", log)
+            # the catalog moved, so every term is exported
+            self.assertIn("scraper/export_json.py\n", log)
+            self.assertNotIn("--current", log)
+
+    def test_a_failed_drift_crawl_is_not_marked_and_fails_the_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run, env, _make_log = self._full_update_sandbox(tmp, remote_env=True)
+            calls = self._drift_python(env, Path(tmp), make_fails=True)
+
+            result = run()
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("catalog drift crawl failed", result.stderr)
+            log = calls.read_text(encoding="utf-8")
+            self.assertNotIn("--mark-handled", log)
+            self.assertNotIn("reseed_roster", log)
+            self.assertIn("--current", log)             # still published, current term only
+
     def test_cart_wrapper_dry_run_selects_only_cart(self) -> None:
         env = os.environ.copy()
         env.update({

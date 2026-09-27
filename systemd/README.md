@@ -178,6 +178,32 @@ set -a; . ./turso-remote.env; set +a
 `make migrate-remote` targets the separate production database in
 `prod-admin.env`, not the collector's.
 
+## Catalog drift re-crawl
+
+The catalog is not crawled on a schedule. Every collector pass compares the
+live search with the seeded roster by (sbjt_cd, lt_no) and records any
+difference in the cloud table `roster_drift` (`drift: +N [...] / -M [...]` in
+the runner log). `update.sh` pulls those rows and runs
+`python -m scraper.roster_drift --check`; it crawls only when the drift
+
+- has been seen on at least `DRIFT_MIN_PASSES` (3) passes and is still present
+  in the newest one,
+- was not already handled, and
+- comes after the term's last `CART_WINDOWS`/`ENROLL_WINDOWS` day (during
+  registration and change periods the roster churns by design).
+
+Then it runs `make refresh … COLLECT=catalog,enrollment,grading`, replaces the
+term's cloud roster (`python -m scraper.reseed_roster`, one transaction,
+refuses a roster that shrank below 90%), marks the drift handled, and exports
+every term. A failure is retried next run and fails the run (alert issue).
+
+To accept a drift without crawling:
+`python -m scraper.roster_drift --year … --semester … --mark-handled <signature>`
+(the signature is in the `--check` output). On 2026-09-28 the drift present
+since the last crawl — live `375.803(042)` and `552.439(002)` missing from the
+catalog — was marked handled this way as the baseline, per the owner (no more
+catalog crawls this semester).
+
 ## Semester rollover
 
 Nothing below happens on its own. In order:
