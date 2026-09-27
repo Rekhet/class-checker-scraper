@@ -113,7 +113,22 @@
      baselines ever diverge — seeding a new collector database while a local
      worker was still sampling did exactly this on 2026-09-04 — the writer sees
      "no change" and never sends the value the reader is missing. The keyframe
-     is what makes that split heal itself within a day.</p>
+     is what makes that split heal itself within a day. Since 2026-09-27 the
+     keyframe re-states every class as <em>samples</em> only: the writer's own
+     <code>count_latest</code> row moves (and its <code>ts</code> advances) only
+     for a class whose numbers changed, since the writer's baseline already
+     holds the rest. That keeps the cloud push to the moved classes (3 rows
+     instead of 8,652 on a measured keyframe) — about half the daily writes.</p>
+  <p><code>count_samples</code> is unique on (year, term, sbjt_cd, lt_no, ts)
+     (<code>idx_samples_key</code>, UNIQUE since 2026-09-27). The cloud push and
+     the local pull both <code>INSERT OR IGNORE</code>, so a retried push or a
+     re-run pull cannot duplicate rows; <code>db.ensure_sample_key_unique()</code>
+     upgrades an older database once, dropping only rows identical in every
+     column and refusing if two rows disagree. <code>idx_classes_term</code> on
+     <code>classes(year, term)</code> and the partial
+     <code>idx_passes_full</code> on <code>count_passes(year, term, ts) WHERE
+     full=1</code> serve the per-term roster reads and the keyframe lookup; the
+     cloud bootstrap copies only the newest keyframe pass.</p>
   <div class="callout warn"><span class="ic">📉</span>
     <p>Storing every class every pass wrote ~1.25M rows a day and exhausted the
        cloud database's monthly write quota mid-semester on 2026-09-04, which

@@ -197,3 +197,36 @@ class CoverageTests(unittest.TestCase):
 
         with self.assertRaises(CollectionError):
             check_coverage({"updated": 8000}, 8652, minimum=0.95)
+
+
+class RetryAndKeyframeScopeTests(unittest.TestCase):
+    def test_pushing_the_same_pass_twice_does_not_duplicate(self) -> None:
+        local = _local_empty()
+        db.init_schema(db._Conn(local, "sqlite"))
+        local.execute(
+            "INSERT INTO count_samples (year, term, sbjt_cd, lt_no, ts, applied,"
+            " quota) VALUES ('2026','T1','M1','001','2026-09-01T09:00:00',1,30)")
+        local.commit()
+        remote = _local_empty()
+        db.init_schema(db._Conn(remote, "sqlite"))
+
+        push_samples(local, remote)
+        push_samples(local, remote)   # the retry after a lost commit
+
+        self.assertEqual(remote.execute(
+            "SELECT COUNT(*) FROM count_samples").fetchone()[0], 1)
+
+    def test_bootstrap_copies_only_the_newest_keyframe(self) -> None:
+        remote, local = _remote_seeded(), _local_empty()
+        for day in (1, 2, 3):
+            db.record_pass(remote, "2026", "T1", f"2026-09-0{day}T09:00:00",
+                           applied=True, cart=False, enrolled=True, full=True)
+        db.record_pass(remote, "2026", "T1", "2026-09-03T09:10:00",
+                       applied=True, cart=False, enrolled=True)
+        remote.commit()
+
+        out = bootstrap_local(remote, local, year="2026", term="T1")
+
+        self.assertEqual(out["keyframes"], 1)
+        self.assertEqual(local.execute(
+            "SELECT ts FROM count_passes").fetchall()[0][0], "2026-09-03T09:00:00")

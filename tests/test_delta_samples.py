@@ -338,3 +338,82 @@ class KeyframeTests(unittest.TestCase):
         db.sample_counts(conn, [(YEAR, TERM)], ts=TS(0), collect_cart=False)
 
         self.assertFalse(db.keyframe_due(conn, YEAR, TERM, TS(24 * 60), hours=0))
+
+
+class KeyframeWriteCostTests(unittest.TestCase):
+    """A keyframe re-states every class as SAMPLES (for the reader), but the
+    writer's own baseline rows move only for classes that really changed —
+    otherwise the cloud push re-sends the whole roster every day."""
+
+    def test_keyframe_rewrites_only_moved_latest_rows(self) -> None:
+        conn = _conn()
+        db.sample_counts(conn, [(YEAR, TERM)], ts=TS(0), collect_cart=False)
+        _set(conn, "M200", enrolled=11)
+
+        written = db.sample_counts(conn, [(YEAR, TERM)], ts=TS(24 * 60),
+                                   collect_cart=False)
+
+        self.assertEqual(written, 2)          # both re-stated as samples
+        latest = dict(conn.execute(
+            "SELECT sbjt_cd, ts FROM count_latest").fetchall())
+        self.assertEqual(latest["M100"], TS(0))        # unchanged: untouched
+        self.assertEqual(latest["M200"], TS(24 * 60))  # moved: rewritten
+
+
+class SampleKeyUniqueTests(unittest.TestCase):
+    def _legacy(self):
+        raw = sqlite3.connect(":memory:")
+        raw.row_factory = sqlite3.Row
+        db.init_schema(db._Conn(raw, "sqlite"))
+        raw.execute("DROP INDEX idx_samples_key")
+        raw.execute("CREATE INDEX idx_samples_key ON count_samples"
+                    "(year, term, sbjt_cd, lt_no, ts)")
+        return raw
+
+    def _insert(self, conn, *rows):
+        conn.executemany(
+            "INSERT INTO count_samples (year, term, sbjt_cd, lt_no, ts,"
+            " applied, cart, enrolled, quota, cancel_vacancy)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
+
+    def test_fresh_schema_is_unique(self) -> None:
+        conn = _conn()
+        self.assertFalse(db.ensure_sample_key_unique(conn))
+        row = (YEAR, TERM, "M100", "001", TS(0), 1, None, 1, 30, 0)
+        db.insert_chunked(conn, "count_samples",
+                          ["year", "term", "sbjt_cd", "lt_no", "ts",
+                           *db.SAMPLE_METRICS], [row, row], ignore=True)
+        self.assertEqual(conn.execute(
+            "SELECT COUNT(*) FROM count_samples").fetchone()[0], 1)
+
+    def test_upgrade_drops_exact_duplicates_only(self) -> None:
+        conn = self._legacy()
+        row = (YEAR, TERM, "M100", "001", TS(0), 1, None, 1, 30, 0)
+        other = (YEAR, TERM, "M200", "002", TS(0), 2, None, 2, 30, 0)
+        self._insert(conn, row, row, other)
+
+        self.assertTrue(db.ensure_sample_key_unique(conn))
+        self.assertEqual(conn.execute(
+            "SELECT COUNT(*) FROM count_samples").fetchone()[0], 2)
+        self.assertFalse(db.ensure_sample_key_unique(conn))   # idempotent
+
+    def test_upgrade_refuses_conflicting_rows(self) -> None:
+        conn = self._legacy()
+        self._insert(conn, (YEAR, TERM, "M100", "001", TS(0), 1, None, 1, 30, 0),
+                     (YEAR, TERM, "M100", "001", TS(0), 9, None, 9, 30, 0))
+        with self.assertRaises(RuntimeError):
+            db.ensure_sample_key_unique(conn)
+        self.assertEqual(conn.execute(
+            "SELECT COUNT(*) FROM count_samples").fetchone()[0], 2)
+
+
+class OverlayTimestampTests(unittest.TestCase):
+    def test_overlay_reports_the_newest_pass_not_the_newest_change(self) -> None:
+        conn = _conn()
+        db.sample_counts(conn, [(YEAR, TERM)], ts=TS(0), collect_cart=False)
+        db.sample_counts(conn, [(YEAR, TERM)], ts=TS(30), collect_cart=False)
+
+        out = db.apply_latest_samples(conn, YEAR, TERM)
+
+        # nothing moved at +30 min, but the collector plainly ran then
+        self.assertEqual(out["ts"], TS(30))

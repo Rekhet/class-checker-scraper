@@ -137,7 +137,10 @@ CREATE INDEX IF NOT EXISTS idx_classes_name ON classes(name);
 CREATE INDEX IF NOT EXISTS idx_classes_prof ON classes(professor);
 CREATE INDEX IF NOT EXISTS idx_classes_dept ON classes(department);
 CREATE INDEX IF NOT EXISTS idx_slots_cell   ON class_slots(day_index, period);
-CREATE INDEX IF NOT EXISTS idx_samples_key  ON count_samples(year, term, sbjt_cd, lt_no, ts);
+-- UNIQUE: a sample's identity is (class, pass). The cloud push and the local
+-- pull both INSERT OR IGNORE against it, so a retried push or a re-run pull
+-- cannot duplicate rows (see ensure_sample_key_unique for older databases).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_samples_key ON count_samples(year, term, sbjt_cd, lt_no, ts);
 -- the cloud->local pull walks the tail by timestamp alone (ts > cursor);
 -- idx_samples_key leads with the class identity, so without this index
 -- every pull full-scans the whole sample table.
@@ -346,8 +349,52 @@ def init_schema(conn: sqlite3.Connection) -> None:
             "INSERT OR IGNORE INTO terms(term, year, label) "
             f"SELECT DISTINCT term, year, year || ' ' || ({_TERM_LABEL_CASE}) "
             "FROM classes")
+    # Created after the column migrations above, which they depend on.
+    # keyframe_due() asks for the newest full pass of one term; without
+    # idx_passes_full the cloud bootstrap scanned the term's pass history.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_passes_full "
+                 "ON count_passes(year, term, ts) WHERE full=1")
+    # Every per-term roster read (cloud bootstrap, sampling, the catalog
+    # overlay) filters on (year, term); the UNIQUE autoindex leads with year
+    # alone, so each read scanned every class of the year (~16.7k for 2026).
+    ccols = [r[1] for r in conn.execute("PRAGMA table_info(classes)").fetchall()]
+    if "term" in ccols:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_classes_term "
+                     "ON classes(year, term)")
+    ensure_sample_key_unique(conn)
     backfill_delta_tables(conn)
     conn.commit()
+
+
+def ensure_sample_key_unique(conn) -> bool:
+    """Upgrade an older database's non-unique idx_samples_key to UNIQUE.
+
+    Exact duplicate rows (every column equal — a retried push) are dropped
+    first, keeping one. Two rows sharing a key but disagreeing on a value are
+    NOT resolved here: that is a real conflict, so the upgrade raises instead
+    of picking a winner. Returns True when the index was rebuilt.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='index' "
+        "AND name='idx_samples_key'").fetchone()
+    if row is None or "UNIQUE" in (row[0] or "").upper():
+        return False
+    cols = "year, term, sbjt_cd, lt_no, ts"
+    conn.execute(
+        "DELETE FROM count_samples WHERE rowid NOT IN ("
+        f"  SELECT MIN(rowid) FROM count_samples GROUP BY {cols}, "
+        "  applied, cart, enrolled, quota, cancel_vacancy)")
+    conflict = conn.execute(
+        f"SELECT {cols} FROM count_samples GROUP BY {cols} "
+        "HAVING COUNT(*) > 1 LIMIT 1").fetchone()
+    if conflict is not None:
+        raise RuntimeError(
+            "count_samples holds conflicting rows for one (class, pass): "
+            f"{tuple(conflict)}; resolve them before idx_samples_key can "
+            "become UNIQUE")
+    conn.execute("DROP INDEX idx_samples_key")
+    conn.execute(f"CREATE UNIQUE INDEX idx_samples_key ON count_samples({cols})")
+    return True
 
 
 SAMPLE_METRICS = ("applied", "cart", "enrolled", "quota", "cancel_vacancy")
@@ -637,13 +684,22 @@ def apply_latest_samples(conn: sqlite3.Connection, year: str, term: str) -> dict
     Reads count_latest, which is already forward-filled per metric, so a class
     that has not moved for days still gets its real numbers. NULL leaves the
     stored value alone, the same COALESCE semantics as `update_counts`.
-    Returns {"ts": <newest pass in the overlay or None>, "updated": n}.
+    Returns {"ts": <newest pass for the term or None>, "updated": n}.
+
+    ``ts`` is the newest PASS, not the newest change: under delta storage a
+    quiet night records passes but no samples, and the publisher's staleness
+    check must not mistake a quiet semester for a stopped collector.
     """
     ts = conn.execute(
         "SELECT MAX(ts) FROM count_latest WHERE year=? AND term=?",
         (year, term)).fetchone()[0]
     if ts is None:
         return {"ts": None, "updated": 0}
+    newest_pass = conn.execute(
+        "SELECT MAX(ts) FROM count_passes WHERE year=? AND term=?",
+        (year, term)).fetchone()[0]
+    if newest_pass and newest_pass > ts:
+        ts = newest_pass
     # One UPDATE ... FROM rather than a statement per class: on a libSQL
     # connection every statement is a round trip, and the roster is ~8,600 rows.
     cur = conn.execute(
@@ -722,7 +778,7 @@ _MAX_PARAMS_PER_STATEMENT = 900
 
 
 def insert_chunked(conn, table: str, cols, rows, *, chunk_rows: int | None = None,
-                   replace: bool = False) -> int:
+                   replace: bool = False, ignore: bool = False) -> int:
     """Insert rows with multi-VALUES statements; returns statements executed.
 
     A remote libSQL connection pays one network round trip per execute(), so
@@ -730,15 +786,19 @@ def insert_chunked(conn, table: str, cols, rows, *, chunk_rows: int | None = Non
     Packing many rows into each INSERT keeps the round-trip count proportional
     to row_count / chunk_rows instead. ``replace=True`` upserts on the target's
     primary key (count_latest), which is how a delta pass rewrites only the
-    classes whose numbers moved.
+    classes whose numbers moved. ``ignore=True`` skips rows whose unique key
+    already exists (count_samples), which makes a retried push harmless.
     """
+    if replace and ignore:
+        raise ValueError("replace and ignore are mutually exclusive")
     rows = list(rows)
     if not rows:
         return 0
     if chunk_rows is None:
         chunk_rows = max(1, _MAX_PARAMS_PER_STATEMENT // len(cols))
     one = "(" + ",".join("?" * len(cols)) + ")"
-    verb = "INSERT OR REPLACE INTO" if replace else "INSERT INTO"
+    verb = ("INSERT OR REPLACE INTO" if replace
+            else "INSERT OR IGNORE INTO" if ignore else "INSERT INTO")
     prefix = f"{verb} {table} ({','.join(cols)}) VALUES "
     statements = 0
     for i in range(0, len(rows), chunk_rows):
@@ -830,13 +890,19 @@ def sample_counts(conn: sqlite3.Connection, year_terms, ts: str | None = None,
             # Compare only what this pass actually looked at: a metric left
             # NULL because its window is closed must not read as a change, and
             # must not overwrite the value the metric last had.
-            changed = keyframe or previous is None or any(
+            moved = previous is None or any(
                 value != previous[name]
                 for name, value in sampled.items() if value is not None)
-            if not changed:
+            if not (moved or keyframe):
                 continue
             samples.append((year, term, r["sbjt_cd"], r["lt_no"], ts,
                             *(sampled[name] for name in SAMPLE_METRICS)))
+            if not moved:
+                # A keyframe re-states an unchanged class for the READER's
+                # sake (a sample the puller folds in). This database's own
+                # baseline already holds these values; rewriting its row would
+                # only make the cloud push re-send the whole roster daily.
+                continue
             merged = {
                 name: (sampled[name] if sampled[name] is not None
                        else (previous[name] if previous is not None else None))
@@ -859,7 +925,8 @@ def sample_counts(conn: sqlite3.Connection, year_terms, ts: str | None = None,
                 "sbjt_cd=? AND lt_no=?", (year, term, sbjt_cd, lt_no))
         insert_chunked(
             conn, "count_samples",
-            ["year", "term", "sbjt_cd", "lt_no", "ts", *SAMPLE_METRICS], samples)
+            ["year", "term", "sbjt_cd", "lt_no", "ts", *SAMPLE_METRICS], samples,
+            ignore=True)
         insert_chunked(
             conn, "count_latest",
             ["year", "term", "sbjt_cd", "lt_no", "ts", *SAMPLE_METRICS], current,

@@ -21,6 +21,11 @@ import os
 import sys
 from pathlib import Path
 
+try:
+    from . import db
+except ImportError:  # pragma: no cover - direct script execution
+    import db  # type: ignore[no-redef]
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DEST = PROJECT_ROOT / "data" / "turso.db"
 STATE_PATH = PROJECT_ROOT / "data" / "pull_counts.state"
@@ -28,12 +33,6 @@ STATE_PATH = PROJECT_ROOT / "data" / "pull_counts.state"
 COLUMNS = ("year", "term", "sbjt_cd", "lt_no", "ts",
            "applied", "cart", "enrolled", "quota", "cancel_vacancy")
 _COLS = ", ".join(COLUMNS)
-_INSERT = (
-    f"INSERT INTO count_samples ({_COLS}) "
-    f"SELECT {', '.join('?' * len(COLUMNS))} "
-    "WHERE NOT EXISTS (SELECT 1 FROM count_samples "
-    "WHERE year=? AND term=? AND sbjt_cd=? AND lt_no=? AND ts=?)"
-)
 
 PASS_COLUMNS = ("year", "term", "ts", "applied", "cart", "enrolled",
                 "full")
@@ -42,20 +41,9 @@ _PASS_INSERT = (
     f"VALUES ({', '.join('?' * len(PASS_COLUMNS))})"
 )
 # count_latest is derived, never copied: db.fold_pass_into_latest rebuilds it
-# from the merged deltas, so the two databases cannot disagree about it.
-_FOLD = (
-    "INSERT OR REPLACE INTO count_latest "
-    "(year, term, sbjt_cd, lt_no, ts, applied, cart, enrolled, quota, "
-    " cancel_vacancy) "
-    "SELECT s.year, s.term, s.sbjt_cd, s.lt_no, s.ts, "
-    "       COALESCE(s.applied, l.applied), COALESCE(s.cart, l.cart), "
-    "       COALESCE(s.enrolled, l.enrolled), COALESCE(s.quota, l.quota), "
-    "       COALESCE(s.cancel_vacancy, l.cancel_vacancy) "
-    "FROM count_samples s LEFT JOIN count_latest l "
-    "  ON l.year=s.year AND l.term=s.term AND l.sbjt_cd=s.sbjt_cd "
-    " AND l.lt_no=s.lt_no "
-    "WHERE s.ts=? AND (l.ts IS NULL OR s.ts >= l.ts)"
-)
+# from the merged deltas (tombstones included), so the two databases cannot
+# disagree about it. It used to be a local copy of that SQL that had drifted:
+# it forward-filled a tombstone instead of retiring the class.
 
 
 def merge_samples(src, dst, since_ts: str | None = None) -> dict:
@@ -89,17 +77,20 @@ def merge_samples(src, dst, since_ts: str | None = None) -> dict:
         rows = src.execute(
             f"SELECT {_COLS} FROM count_samples WHERE ts = ?", (ts,)
         ).fetchall()
-        for row in rows:
-            row = tuple(row)
-            cur = dst.execute(_INSERT, row + row[:5])
-            inserted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        # Multi-row INSERT OR IGNORE on the (class, pass) unique key: a
+        # keyframe is ~8,600 rows, which used to be 8,600 single-row
+        # NOT EXISTS statements. total_changes() counts what actually landed.
+        before = dst.execute("SELECT total_changes()").fetchone()[0]
+        db.insert_chunked(dst, "count_samples", COLUMNS,
+                          [tuple(r) for r in rows], ignore=True)
+        inserted += dst.execute("SELECT total_changes()").fetchone()[0] - before
         for pass_row in src.execute(
                 f"SELECT {', '.join(PASS_COLUMNS)} FROM count_passes WHERE ts = ?",
                 (ts,)).fetchall():
             dst.execute(_PASS_INSERT, tuple(pass_row))
             passes += 1
         # Ascending ts, so the forward fill sees each pass in order.
-        dst.execute(_FOLD, (ts,))
+        db.fold_pass_into_latest(dst, ts)
         dst.commit()
         total += len(rows)
         if max_ts is None or ts > max_ts:
@@ -146,6 +137,11 @@ def main(argv: list[str] | None = None) -> int:
 
     src = libsql.connect(url, auth_token=token)
     dst = libsql.connect(str(args.dest))
+    # INSERT OR IGNORE only dedupes against a UNIQUE key; upgrade a catalog
+    # created before idx_samples_key became unique (a one-time rebuild).
+    if db.ensure_sample_key_unique(dst):
+        dst.commit()
+        print("upgraded idx_samples_key to UNIQUE")
     since = None if args.full else _read_state()
     out = merge_samples(src, dst, since_ts=since)
     _write_state(out["max_ts"])

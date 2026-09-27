@@ -37,9 +37,9 @@ next GitHub Actions runner pass.
 | 3 | Workflow: year/semester from `collect.env`, window gate before setup, `PYTHONUNBUFFERED`, `uv sync --locked`, Node 24 action versions | done |
 | 4 | `_slow_slot_minutes` default 60 (matches docs and collect.env) | done |
 | 5 | `server.py`: reject cross-origin POSTs when no admin token is set | done |
-| 6 | Turso: `classes(year, term)` index, keyframe partial index, bootstrap copies only the latest keyframe | pending |
-| 7 | Turso: `count_samples` UNIQUE key, `INSERT OR IGNORE` push/pull, pull reuses `db.fold_pass_into_latest` | pending |
-| 8 | Keyframe pushes only changed `count_latest` rows | pending |
+| 6 | Turso: `classes(year, term)` index, keyframe partial index, bootstrap copies only the latest keyframe | done |
+| 7 | Turso: `count_samples` UNIQUE key, `INSERT OR IGNORE` push/pull, pull reuses `db.fold_pass_into_latest` | done |
+| 8 | Keyframe pushes only changed `count_latest` rows | done (keyframe push pending runner verification ~2026-09-28 13:12 KST) |
 | 9 | Export: stop rewriting unchanged files (`generated` churn) | pending |
 | 10 | Trend change-point format + client decoder, LRU window cache, time-based X axis, KST timestamps | pending |
 | 11 | Client boot: cacheable assets, parallel partials, `loadMore` sort cache | pending |
@@ -80,3 +80,27 @@ next GitHub Actions runner pass.
   Origin → 200; `Origin: https://evil.example` on `/api/lookup` and on a
   `text/plain` `/api/refresh` → 403; a same-origin `fetch()` from the page in
   headless Chromium → 200 with real class rows.
+
+### Items 6–8: Turso reads and writes (2026-09-27)
+
+- Read-only duplicate check before the UNIQUE change: cloud `count_samples`
+  204,723 rows, local 7,229,722 rows — **0** duplicate keys and 0 exact
+  duplicates in both, so no row was deleted anywhere.
+- Local `data/turso.db` migrated under the process lock (`init_schema`,
+  120.5 s, one-time); snapshot taken first to `~/.backup/class-checker/`.
+  Query plans: roster read → `SEARCH classes USING INDEX idx_classes_term
+  (year=? AND term=?)`; keyframe lookup → `COVERING INDEX idx_passes_full`.
+- Cloud migrated with the same code (`CREATE INDEX` ×2 +
+  `ensure_sample_key_unique`), 7.0 s, row count unchanged (204,723). The
+  roster read went from `sqlite_autoindex_classes_1 (year=?)` (~16.7k rows
+  scanned for 8,652 returned) to `idx_classes_term (year=? AND term=?)`.
+- Dry run on the new code: `bootstrap … keyframes: 1` (was 22 and growing
+  daily), coverage 100%.
+- Forced keyframe in a dry run (`COUNT_KEYFRAME_HOURS=1`): 8,652 samples as
+  before, but only **3** `count_latest` rows would be pushed (was 8,652).
+- Real pull with the new code: 17,443 rows / 315 passes merged in 85 s, 0
+  duplicate keys afterwards, and local `count_latest` for 2026-2 matches the
+  cloud's exactly (8,652 rows, 0 mismatches).
+- Pending: the first scheduled keyframe on the runner after deployment
+  (~2026-09-28 13:12 KST) should log `push: … latest:` in single or double
+  digits rather than 8,652.

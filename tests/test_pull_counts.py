@@ -136,3 +136,17 @@ class MergeSamplesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PullTombstoneTests(unittest.TestCase):
+    def test_a_pulled_tombstone_retires_the_class(self) -> None:
+        tomb = ("2026", "T1", "M100", "001", "2026-09-01T09:10:00",
+                None, None, None, None, None)
+        src = _db([ROW_A, tomb], passes=[
+            ("2026", "T1", ROW_A[4], 1, 0, 1), ("2026", "T1", tomb[4], 1, 0, 1)])
+        dst = _db()
+
+        merge_samples(src, dst)
+
+        self.assertEqual(dst.execute(
+            "SELECT COUNT(*) FROM count_latest").fetchone()[0], 0)

@@ -90,11 +90,13 @@ def bootstrap_local(remote, local, *, year: str, term: str) -> dict:
         "latest": _copy_query(
             remote, local, "count_latest", "year=? AND term=?", (year, term)
         ),
-        # Only the keyframe passes: the scratch DB has no history of its own,
-        # and db.keyframe_due() has to know when this term was last re-stated
-        # in full or every run would think a keyframe is overdue.
+        # Only the NEWEST keyframe pass: the scratch DB has no history of its
+        # own, and db.keyframe_due() needs just the time this term was last
+        # re-stated in full (MAX(ts)), or every run would think one is
+        # overdue. Copying all of them read one more row per day, forever.
         "keyframes": _copy_query(
-            remote, local, "count_passes", "full=1 AND year=? AND term=?",
+            remote, local, "count_passes",
+            "full=1 AND year=? AND term=? ORDER BY ts DESC LIMIT 1",
             (year, term)
         ),
     }
@@ -151,8 +153,10 @@ def push_samples(local, remote, *, skip_pass_ts=()) -> dict:
     latest = [r for r in local.execute(
         "SELECT year, term, sbjt_cd, lt_no, ts, applied, cart, enrolled, quota,"
         " cancel_vacancy FROM count_latest").fetchall() if r[4] in own_ts]
+    # OR IGNORE on the (class, pass) unique key: re-running a push whose
+    # commit was lost must not duplicate the samples that did land.
     db.insert_chunked(remote, "count_samples", SAMPLE_COLS,
-                      [tuple(r) for r in rows])
+                      [tuple(r) for r in rows], ignore=True)
     for pass_row in passes:
         remote.execute(
             f"INSERT OR REPLACE INTO count_passes ({', '.join(PASS_COLS)}) "
