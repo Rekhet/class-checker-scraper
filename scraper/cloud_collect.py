@@ -40,6 +40,12 @@ except ImportError:  # pragma: no cover - direct script execution
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCRATCH = PROJECT_ROOT / "data" / "cloud-collect.db"
 
+# Fraction of the seeded roster a pass must match before its samples are
+# pushed. A full pass matches every class (8,652/8,652 on 2026-09-27); a few
+# 폐강 classes dropping out of the live search cost well under 1%. Anything
+# far below that is a broken fetch, not a quieter semester.
+MIN_COVERAGE = float(os.environ.get("COUNT_MIN_COVERAGE", "0.95") or 0.95)
+
 TERM_CODES = {
     "spring": "U000200001U000300001",
     "summer": "U000200001U000300002",
@@ -94,6 +100,34 @@ def bootstrap_local(remote, local, *, year: str, term: str) -> dict:
     }
     local.commit()
     return counts
+
+
+def overlay_latest(local, *, year: str, term: str) -> dict:
+    """Give the scratch roster the cloud's CURRENT counts, not the seeded ones.
+
+    The cloud `classes` table keeps whatever counts it was seeded with; only
+    count_latest moves. The sampler compares `classes` against count_latest, so
+    any class the live fetch does not reach (an empty page 1, a class that left
+    the search) would otherwise be recorded as a "change" back to its seeded
+    value — silently rewinding both the trend and the cloud baseline.
+    """
+    return db.apply_latest_samples(db._Conn(local, "sqlite"), year, term)
+
+
+class CollectionError(RuntimeError):
+    """A pass that must fail the runner loudly instead of pushing."""
+
+
+def check_coverage(out: dict, roster: int, *,
+                   minimum: float = MIN_COVERAGE) -> float:
+    """Raise when the pass matched too little of the roster to be trusted."""
+    updated = int(out.get("updated") or 0)
+    coverage = updated / roster if roster else 0.0
+    if coverage < minimum:
+        raise CollectionError(
+            f"live pass matched {updated}/{roster} classes "
+            f"({coverage:.1%} < {minimum:.0%}); not pushing")
+    return coverage
 
 
 def push_samples(local, remote, *, skip_pass_ts=()) -> dict:
@@ -152,6 +186,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--year", required=True)
     ap.add_argument("--semester", required=True, choices=sorted(TERM_CODES))
     ap.add_argument("--scratch", type=Path, default=DEFAULT_SCRATCH)
+    ap.add_argument("--dry-run", action="store_true",
+                    help="bootstrap, crawl and sample into the scratch DB, but "
+                         "push nothing to the cloud (for verifying a change)")
     args = ap.parse_args(argv)
     term = TERM_CODES[args.semester]
 
@@ -169,7 +206,16 @@ def main(argv: list[str] | None = None) -> int:
     remote = _remote_connect()
     counts = bootstrap_local(remote, local, year=args.year, term=term)
     remote.close()   # crawl takes minutes; never hold a remote stream across it
-    print(f"bootstrap: {counts}")
+    print(f"bootstrap: {counts}", flush=True)
+    if not counts["classes"]:
+        # Every live row would go unmatched and each pass would record an empty
+        # axis point: the state a new semester is in until the cloud roster is
+        # re-seeded from the local catalog (see systemd/README.md).
+        raise CollectionError(
+            f"cloud roster for {args.year} {args.semester} ({term}) is empty; "
+            "re-seed it from the local catalog before collecting")
+    print(f"overlay: {overlay_latest(local, year=args.year, term=term)}",
+          flush=True)
 
     # Captured BEFORE sampling: everything already here came from the cloud.
     bootstrapped_passes = [r[0] for r in local.execute(
@@ -179,8 +225,19 @@ def main(argv: list[str] | None = None) -> int:
     out = crawl.refresh_counts_all(
         conn, [args.year], terms=[term],
         collect_cart=False, collect_enrollment=True, windowed=True,
+        strict_sampling=True,
     )
-    print(f"collect: {out}")
+    print(f"collect: {out}", flush=True)
+    if out.get("skipped"):
+        # the window closed between the gate above and the pass itself
+        print(f"skipped: {out['skipped']}")
+        return 0
+    print(f"coverage: {check_coverage(out, counts['classes']):.2%}", flush=True)
+    if args.dry_run:
+        n = local.execute("SELECT COUNT(*) FROM count_samples").fetchone()[0]
+        local.close()
+        print(f"dry run: {n} sample rows left in {args.scratch}; nothing pushed")
+        return 0
 
     remote = _remote_connect()
     pushed = push_samples(local, remote, skip_pass_ts=bootstrapped_passes)

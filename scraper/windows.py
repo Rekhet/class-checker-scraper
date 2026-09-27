@@ -99,6 +99,40 @@ ENROLL_ENV = "ENROLL_WINDOWS"
 ENROLL_SLOW_ENV = "ENROLL_SLOW_WINDOWS"
 
 
+def slow_slot_minutes() -> int:
+    """ENROLL_SLOW_SLOT_MINUTES clamped to 1..60; unset or invalid means 60,
+    the gate open all hour (see crawl._slow_enroll_open)."""
+    raw = (os.environ.get("ENROLL_SLOW_SLOT_MINUTES") or "").strip()
+    try:
+        value = int(raw) if raw else 60
+    except ValueError:
+        value = 60
+    return max(1, min(60, value))
+
+
+def enrollment_pass_due(now: datetime | None = None) -> bool:
+    """Would a windowed enrollment-only pass collect right now?
+
+    The same decision crawl._window_active(collect_cart=False) makes, without
+    importing the crawler: the GitHub runner asks this BEFORE installing
+    dependencies and a browser, so the off-season runs that make up most of
+    the year cost a checkout and nothing else. tests/test_windows.py keeps the
+    two answers identical.
+    """
+    today = today_iso(now)
+    spec = (os.environ.get(ENROLL_ENV) or "").strip()
+    if spec:
+        enrolled = in_windows(spec, today)
+    else:   # the crawler's legacy single-window fallback
+        enrolled = in_window(os.environ.get("ENROLL_START"),
+                             os.environ.get("ENROLL_END"), today)
+    if enrolled:
+        return True
+    slow = (os.environ.get(ENROLL_SLOW_ENV) or "").strip()
+    return bool(slow) and in_windows(slow, today) and hour_slot_open(
+        now, slow_slot_minutes())
+
+
 def collection_active(today: str | None = None) -> dict:
     """What collect.env expects to be collected today.
 
@@ -113,3 +147,26 @@ def collection_active(today: str | None = None) -> dict:
         "enroll": in_windows(os.environ.get(ENROLL_ENV), today),
         "slow": in_windows(os.environ.get(ENROLL_SLOW_ENV), today),
     }
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``python3 scraper/windows.py gate``: print (and, on a GitHub runner,
+    export as a step output) whether an enrollment pass is due right now."""
+    import sys
+
+    args = sys.argv[1:] if argv is None else argv
+    if args != ["gate"]:
+        print("usage: windows.py gate", file=sys.stderr)
+        return 2
+    active = enrollment_pass_due()
+    line = f"active={'true' if active else 'false'}"
+    print(line)
+    output = os.environ.get("GITHUB_OUTPUT")
+    if output:
+        with open(output, "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

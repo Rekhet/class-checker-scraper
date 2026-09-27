@@ -439,3 +439,38 @@ class CountsPipelineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StrictSamplingTests(unittest.TestCase):
+    def _run(self, **kwargs):
+        client = type("Client", (), {
+            "fetch_terms": lambda _self, year: [
+                {"year": year, "term": "T1", "label": "t"}],
+        })()
+        with patch.dict(os.environ, {"ENROLL_WINDOWS": "2000-01-01..2099-12-31"},
+                        clear=False), \
+             patch.object(crawl, "SnuClient", return_value=client), \
+             patch.object(crawl, "refresh_counts",
+                          return_value={"updated": 1}), \
+             patch.object(crawl.db, "sample_counts",
+                          side_effect=RuntimeError("disk full")):
+            return crawl.refresh_counts_all(
+                None, ["2026"], terms=["T1"], collect_cart=False,
+                collect_enrollment=True, windowed=True, **kwargs)
+
+    def test_sampling_failure_is_logged_by_default(self) -> None:
+        with self.assertLogs("class-checker", level="ERROR"):
+            out = self._run()
+        self.assertEqual(out["samples"], 0)
+
+    def test_strict_sampling_reraises(self) -> None:
+        with self.assertRaises(RuntimeError):
+            self._run(strict_sampling=True)
+
+
+class SlowSlotDefaultTests(unittest.TestCase):
+    def test_unset_slot_keeps_the_gate_open_all_hour(self) -> None:
+        env = {k: v for k, v in os.environ.items()
+               if k != "ENROLL_SLOW_SLOT_MINUTES"}
+        with patch.dict(os.environ, env, clear=True):
+            self.assertEqual(crawl._slow_slot_minutes(), 60)

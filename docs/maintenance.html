@@ -241,6 +241,10 @@ curl -s http://127.0.0.1:8011/api/status | python3 -m json.tool</code></pre>
         <td>Reconciliation runs on load and after a refresh; reload the page, or trigger a refresh, to re-sync via <code>/api/lookup</code>.</td></tr>
     <tr><td>2학기 (fall) shows few timed classes</td>
         <td>Expected before SNU publishes fall times. Timing fills in from search cells and is upgraded to exact on later rebuilds.</td></tr>
+    <tr><td>Runner fails with <code>cloud roster for … is empty</code></td>
+        <td>The cloud <code>classes</code> table has no rows for <code>COUNT_YEAR</code>/<code>COUNT_SEM</code> — a new semester whose roster was never seeded. Crawl it locally, then re-seed (systemd/README.md → Semester rollover). Nothing is pushed until then.</td></tr>
+    <tr><td>Runner fails with <code>live pass matched N/M classes … not pushing</code></td>
+        <td>The live search returned far less than the seeded roster (maintenance page, changed markup, IP block); the pass is discarded rather than recorded. Threshold <code>COUNT_MIN_COVERAGE</code> (default 0.95). A healthy pass prints <code>coverage: 100.00%</code>. Reproduce without writing anything: <code>python -m scraper.cloud_collect --year … --semester … --dry-run</code> with <code>turso-remote.env</code> sourced.</td></tr>
     <tr><td>Port already in use</td>
         <td>Another server instance is running — change <code>PORT</code> or stop the old process.</td></tr>
   </table></div>

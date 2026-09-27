@@ -117,10 +117,13 @@
     <tr><td>수강취소 (drip, mySNU)</td><td>09-08 ~ 10-20</td><td>frozen</td><td>drops</td><td>ENROLL_SLOW <sup>†</sup></td></tr>
     <tr><td>정원외신청 (폐강교과목)</td><td>09-17 ~ 09-22</td><td>frozen</td><td><strong>moves</strong></td><td>ENROLL_SLOW</td></tr>
   </table></div>
-  <p><sup>†</sup> The 수강취소 tail <em>is</em> collected, on the slow cadence:
-     <code>ENROLL_SLOW_WINDOWS</code> samples only the run that lands in the first
-     <code>ENROLL_SLOW_SLOT_MINUTES</code> (default 10) of each hour, so six weeks of
-     drip cost one sample an hour instead of six. The earlier rule excluded the tail
+  <p><sup>†</sup> The 수강취소 tail <em>is</em> collected: <code>ENROLL_SLOW_WINDOWS</code>
+     samples only the run that lands in the first <code>ENROLL_SLOW_SLOT_MINUTES</code>
+     of each hour. That value is 60 in <code>collect.env</code> and has defaulted to 60
+     in code since 2026-09-27, so the gate stays open all hour and 수강취소 is sampled at
+     the ordinary 10-minute cadence; under delta storage thinning would save ~4% of
+     writes for 6× coarser timing. Set it lower only for a period that genuinely needs
+     thinning. The earlier rule excluded the tail
      because a 240-sample trend window would have evicted the registration arc;
      archived trend windows (<code>export_trend_archives</code>) now keep that history
      instead, so nothing has to be dropped. A day that is in both lists is sampled at
@@ -131,7 +134,7 @@
 	CART_WINDOWS=2026-08-04..2026-08-05
 ENROLL_WINDOWS=2026-07-30..2026-07-31,2026-08-07,2026-08-10..2026-08-11,2026-08-28..2026-08-31,2026-09-01..2026-09-09
 ENROLL_SLOW_WINDOWS=2026-09-08..2026-10-20
-ENROLL_SLOW_SLOT_MINUTES=10</code></pre>
+ENROLL_SLOW_SLOT_MINUTES=60</code></pre>
   <div class="callout"><span class="ic">🧩</span>
     <p><code>_in_windows()</code> samples on ANY match, so the configured 담기 span and the
        four enrolment spans are captured while the 확정 days and the ~16-day

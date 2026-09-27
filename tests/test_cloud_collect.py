@@ -139,3 +139,61 @@ class PushScopeTests(unittest.TestCase):
         self.assertEqual(out["latest"], 1)
         pushed = remote.execute("SELECT sbjt_cd FROM count_latest").fetchall()
         self.assertEqual([r[0] for r in pushed], ["NEW"])
+
+
+class OverlayLatestTests(unittest.TestCase):
+    """The scratch roster must compare CURRENT values, not seeded ones."""
+
+    def _scratch(self) -> sqlite3.Connection:
+        remote, local = _remote_seeded(), _local_empty()
+        # the cloud baseline moved on after seeding: applied is now 100+i
+        remote.executemany(
+            "INSERT INTO count_latest (year, term, sbjt_cd, lt_no, ts, applied,"
+            " enrolled, quota) VALUES ('2026','T1',?,?,'2026-09-26T09:00:00',"
+            " ?, ?, 30)",
+            [(f"M{i:05d}", "001", 100 + i, 100 + i) for i in range(5)])
+        db.record_pass(remote, "2026", "T1", "2026-09-26T09:00:00",
+                       applied=True, cart=False, enrolled=True, full=True)
+        remote.commit()
+        bootstrap_local(remote, local, year="2026", term="T1")
+        return local
+
+    def test_unfetched_classes_record_no_change_after_overlay(self) -> None:
+        from scraper.cloud_collect import overlay_latest
+
+        local = self._scratch()
+        out = overlay_latest(local, year="2026", term="T1")
+        self.assertEqual(out["updated"], 5)
+
+        # a pass whose live fetch reached nothing: classes keep their values
+        written = db.sample_counts(
+            db._Conn(local, "sqlite"), [("2026", "T1")],
+            ts="2026-09-26T09:10:00", collect_cart=False)
+        self.assertEqual(written, 0)
+
+    def test_without_overlay_seeded_values_would_rewind_the_baseline(self) -> None:
+        local = self._scratch()
+        written = db.sample_counts(
+            db._Conn(local, "sqlite"), [("2026", "T1")],
+            ts="2026-09-26T09:10:00", collect_cart=False)
+        # the regression this guards against: all five rewound to seeded 0..4
+        self.assertEqual(written, 5)
+
+
+class CoverageTests(unittest.TestCase):
+    def test_full_pass_is_accepted(self) -> None:
+        from scraper.cloud_collect import check_coverage
+
+        self.assertEqual(check_coverage({"updated": 8652}, 8652), 1.0)
+
+    def test_empty_pass_is_rejected(self) -> None:
+        from scraper.cloud_collect import CollectionError, check_coverage
+
+        with self.assertRaises(CollectionError):
+            check_coverage({"updated": 0}, 8652)
+
+    def test_partial_pass_below_minimum_is_rejected(self) -> None:
+        from scraper.cloud_collect import CollectionError, check_coverage
+
+        with self.assertRaises(CollectionError):
+            check_coverage({"updated": 8000}, 8652, minimum=0.95)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from unittest.mock import patch
 
 from scraper import crawl, windows
@@ -51,7 +52,10 @@ class SlowWindowSamplingTests(unittest.TestCase):
                ENROLL_SLOW_WINDOWS="2026-09-08..2026-10-20")
 
     def test_slow_window_samples_once_an_hour(self) -> None:
-        with patch.dict(os.environ, self.ENV, clear=False), \
+        # an explicitly narrowed slot thins the cadence; the default (60)
+        # keeps the gate open all hour — see SlowSlotDefaultTests
+        env = dict(self.ENV, ENROLL_SLOW_SLOT_MINUTES="10")
+        with patch.dict(os.environ, env, clear=False), \
              patch.object(crawl, "_today_iso", return_value="2026-09-15"):
             self.assertTrue(crawl._slow_enroll_open(_seoul(14, 3)))
             self.assertFalse(crawl._slow_enroll_open(_seoul(14, 33)))
@@ -135,3 +139,50 @@ class StaleExitCodeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RunnerGateParityTests(unittest.TestCase):
+    """windows.enrollment_pass_due (the pre-install runner gate) must agree
+    with the crawler's own decision, or the runner would skip real passes."""
+
+    CASES = [
+        # (env overrides, local day, hour, minute)
+        ({}, "2026-09-05", 14, 3),                       # fast window
+        ({}, "2026-09-15", 14, 33),                      # slow window, slot 60
+        ({"ENROLL_SLOW_SLOT_MINUTES": "10"}, "2026-09-15", 14, 3),
+        ({"ENROLL_SLOW_SLOT_MINUTES": "10"}, "2026-09-15", 14, 33),
+        ({}, "2026-10-21", 9, 0),                        # after every window
+        ({}, "2026-08-04", 9, 0),                        # cart-only day
+        ({"ENROLL_WINDOWS": ""}, "2026-09-15", 14, 33),  # legacy fallback
+        ({"ENROLL_WINDOWS": "", "ENROLL_START": "2026-09-20"},
+         "2026-09-15", 14, 33),
+    ]
+
+    def test_gate_matches_crawler(self) -> None:
+        base = dict(SEOUL, CART_WINDOWS="2026-08-04",
+                    ENROLL_WINDOWS="2026-09-01..2026-09-09",
+                    ENROLL_SLOW_WINDOWS="2026-09-08..2026-10-20")
+        for overrides, day, hour, minute in self.CASES:
+            env = dict(base, **overrides)
+            y, m, d = map(int, day.split("-"))
+            instant = datetime(y, m, d, hour, minute,
+                               tzinfo=ZoneInfo("Asia/Seoul"))
+            with self.subTest(overrides=overrides, day=day, minute=minute), \
+                 patch.dict(os.environ, env, clear=False), \
+                 patch.object(crawl, "_today_iso", return_value=day), \
+                 patch.object(crawl.windows, "now_local",
+                              side_effect=lambda now=None, _i=instant: _i):
+                crawler = crawl._window_active(collect_cart=False,
+                                               collect_enrollment=True)
+                gate = windows.enrollment_pass_due(instant)
+                self.assertEqual(gate, crawler)
+
+    def test_gate_cli_writes_github_output(self) -> None:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("r+", suffix=".out") as fh, \
+             patch.dict(os.environ, dict(SEOUL, ENROLL_WINDOWS="2000-01-01..2099-12-31",
+                                         GITHUB_OUTPUT=fh.name), clear=False):
+            self.assertEqual(windows.main(["gate"]), 0)
+            fh.seek(0)
+            self.assertEqual(fh.read(), "active=true\n")

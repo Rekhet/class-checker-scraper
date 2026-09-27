@@ -84,12 +84,9 @@ def _slow_enroll_open(now: datetime | None = None) -> bool:
 
 
 def _slow_slot_minutes() -> int:
-    raw = (os.environ.get("ENROLL_SLOW_SLOT_MINUTES") or "").strip()
-    try:
-        value = int(raw) if raw else 10
-    except ValueError:
-        value = 10
-    return max(1, min(60, value))
+    # Default 60 (gate open all hour), matching collect.env and the docstring
+    # above: a dropped variable must not silently thin collection to hourly.
+    return windows.slow_slot_minutes()
 
 
 def _sample_windows() -> dict:
@@ -641,12 +638,17 @@ def refresh_counts_all(conn, years: list[str], terms: list[str] | None = None, *
                        force: bool = False, progress: ProgressFn | None = None,
                        collect_cart: bool = True, collect_enrollment: bool = True,
                        cart_only: bool | None = None,
-                       windowed: bool = False) -> dict:
+                       windowed: bool = False,
+                       strict_sampling: bool = False) -> dict:
     """Live-metric pass for the fast timer: no Excel download, just re-poll the
     search endpoint per stored term and overlay the selected metrics.
 
     A windowed pass exits before creating a session when its configured metric
     window is inactive. This keeps a generic timer from polling SNU off-season.
+
+    ``strict_sampling`` re-raises a sampling failure instead of logging it. The
+    cloud collector sets it: there the sample IS the product, and a pass that
+    recorded nothing must fail the run rather than push a half-written pass.
     """
     if cart_only is not None:
         collect_cart = True
@@ -681,6 +683,8 @@ def refresh_counts_all(conn, years: list[str], terms: list[str] | None = None, *
             for p in plan:
                 db.mark_closed(conn, p["year"], p["term"])
     except Exception:  # noqa: BLE001 - sampling must not break a good counts pass
+        if strict_sampling:
+            raise
         log.exception("count sampling failed")
     return {"updated": total, "samples": samples, "terms": [p["term"] for p in plan]}
 

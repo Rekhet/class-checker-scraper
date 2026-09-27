@@ -33,9 +33,9 @@ next GitHub Actions runner pass.
 | # | Item | Status |
 |---|------|--------|
 | 1 | `.gitignore`: cover `backups/*.env*`, `backups/*.db` | done |
-| 2 | Collector: overlay `count_latest` onto the scratch roster, fail on empty/low-coverage fetch, re-raise sampling errors on the cloud path, fail on empty roster | pending |
+| 2 | Collector: overlay `count_latest` onto the scratch roster, fail on empty/low-coverage fetch, re-raise sampling errors on the cloud path, fail on empty roster | done (pending runner verification) |
 | 3 | Workflow: year/semester from `collect.env`, window gate before setup, `PYTHONUNBUFFERED`, `uv sync --locked`, Node 24 action versions | pending |
-| 4 | `_slow_slot_minutes` default 60 (matches docs and collect.env) | pending |
+| 4 | `_slow_slot_minutes` default 60 (matches docs and collect.env) | done (pending runner verification) |
 | 5 | `server.py`: reject cross-origin POSTs when no admin token is set | pending |
 | 6 | Turso: `classes(year, term)` index, keyframe partial index, bootstrap copies only the latest keyframe | pending |
 | 7 | Turso: `count_samples` UNIQUE key, `INSERT OR IGNORE` push/pull, pull reuses `db.fold_pass_into_latest` | pending |
@@ -52,4 +52,18 @@ next GitHub Actions runner pass.
 
 ## Verification log
 
-(Filled in per item with dates, commit IDs, and measured results.)
+### Items 2–4: collector guards, workflow (2026-09-27)
+
+- Measured the regression the overlay prevents, read-only against the cloud
+  database: after bootstrap, **3,471 of 8,652** fall-2026 classes carried
+  seeded counts that differ from the current `count_latest`. Under the old
+  code a pass whose live fetch came back empty would have recorded all 3,471
+  as "changes" back to those stale values, and exited 0.
+- `--dry-run` pass against the real cloud and sugang (no push):
+  `bootstrap: classes 8652, latest 8652, keyframes 22` →
+  `overlay: updated 8652` → `collect: updated 8652, samples 0` →
+  `coverage: 100.00%`, 75 s wall time. Recent runner passes also show
+  8,652/8,652, so the 95% floor leaves ample margin for 폐강 drop-outs.
+- Runner gate: `python3 scraper/windows.py gate` with collect.env prints
+  `active=true` today (slow window) and `active=false` with the slow window
+  cleared; parity with `crawl._window_active` is tested over 8 cases.
