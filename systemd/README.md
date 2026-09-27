@@ -1,6 +1,7 @@
 # User timers
 
-The hourly full-update service does **not** crawl sugang. The 10-minute 인원
+The scheduled full-update service (06:00, 12:00, 18:00 daily since
+2026-09-27; it was hourly on weekdays 09–20) does **not** crawl sugang. The 10-minute 인원
 pass runs on GitHub-hosted runners (cron-job.org -> `collect-counts.yml` ->
 `scraper/cloud_collect.py` -> cloud Turso), so `scripts/update.sh` merges those
 samples (`scraper/pull_counts.py`), copies the newest sample onto the catalog's
@@ -24,7 +25,7 @@ systemctl --user enable --now class-checker.update-counts.timer
 ```
 
 It is still window-gated by `collect.env`, so it costs nothing off-season, and
-the hourly full update publishes what it collects. Disable it again once the
+the scheduled full update publishes what it collects. Disable it again once the
 remote collector is running, and keep the `collect-counts` workflow disabled
 (`gh workflow disable collect-counts`) while the database refuses writes, so
 every dispatch does not turn into a failure mail.
@@ -35,7 +36,7 @@ machine resumes — seconds before NetworkManager has a link, which used to kill
 the run outright. The script waits (best-effort `nm-online`, then reachability
 probes of github.com and the Turso host read from `turso-remote.env`) up to
 `WAIT_ONLINE_TIMEOUT` seconds, default 300; a still-dead network fails the
-pre-start and leaves the next hourly activation to retry.
+pre-start and leaves the next scheduled activation to retry.
 
 The full update service and the fast cart/enrollment/trend services all use the same
 host-local `data/.crawl.lock`. The lock is held across the database operation,
@@ -52,9 +53,9 @@ Unchanged files are not rewritten: frozen trend chunks stay as written, and
 moved (it used to be re-committed every hour for the stamp alone).
 
 The bounded cart/enrollment/trend services commit each generated trend update in the
-`web/` repository but deliberately does not push it. The hourly
+`web/` repository but deliberately does not push it. The
 `class-checker.update.timer` runs the full update and is the scheduled push
-boundary, so it publishes the accumulated local commits once per hour. A
+boundary, so it publishes the accumulated local commits at each run. A
 manual `scripts/publish.sh counts` or `trend` invocation follows the same
 commit-only policy; full publication retains the `PUBLISH_PUSH=0` escape hatch.
 
@@ -69,9 +70,51 @@ install -Dm644 systemd/class-checker.update-counts.service \
   "$HOME/.config/systemd/user/class-checker.update-counts.service"
 install -Dm644 systemd/class-checker.update-counts.timer \
   "$HOME/.config/systemd/user/class-checker.update-counts.timer"
+for f in class-checker-alert@.service class-checker.backup.service \
+         class-checker.backup.timer; do
+  install -Dm644 "systemd/$f" "$HOME/.config/systemd/user/$f"
+done
 systemctl --user daemon-reload
-systemctl --user enable --now class-checker.update.timer
+systemctl --user enable --now class-checker.update.timer class-checker.backup.timer
 ```
+
+Restarting `class-checker.update.timer` after changing its schedule replays a
+missed slot at once (`Persistent=true`), which is a normal run.
+
+## Failure alerts
+
+`class-checker.update.service` and `class-checker.backup.service` carry
+`OnFailure=class-checker-alert@%n.service`, which runs
+`scripts/notify-failure.sh <unit>`:
+
+- the unit's last 400 journal lines go to
+  `data/logs/failures/<unit>-<time>.log` (mode 600, ignored by git, newest 50
+  kept) and **nowhere else**;
+- a GitHub issue titled `ops-alert: <unit> failed` (label `ops-alert`) is
+  opened on `Rekhet/class-checker-scraper` — or, while one for the same unit is
+  open, commented on — with the time, result, exit status, and the local log's
+  path. No log text is uploaded: the repository is public. GitHub mails the
+  owner for new issues and comments.
+
+Close the issue once the cause is fixed. `gh` must stay authenticated for the
+user; if it is not, the alert unit itself fails and only the journal has it.
+The update service also has `TimeoutStartSec=45min`, so a hung pull or push
+can no longer hold `data/.crawl.lock` forever. Verified 2026-09-27 with a
+transient unit running `/bin/false`: the first failure opened issue #1, the
+second commented on it (closed as a test).
+
+## Weekly backup
+
+`class-checker.backup.timer` (Sundays 04:30, replayed after downtime) runs
+`scripts/backup-db.sh`: an online snapshot of `data/turso.db` through the
+SQLite backup API, `PRAGMA quick_check`, then `xz -9e` into
+`~/.backup/class-checker/turso-<time>.db.xz` (mode 600). The newest three are
+kept (`BACKUP_KEEP`). `count_samples` cannot be re-collected from SNU, so this
+is the only copy of the enrollment history outside the cloud collector's
+database, which holds only the current semester. Measured on the 1.37 GB
+catalog: zstd -19 85 MB (4 min), zstd --ultra -22 84 MB (13 min), xz -9e
+61 MB (6.6 min). Restore with `xz -dc <archive> > data/turso.db` while no
+unit is running.
 
 Each worker service creates the private user-runtime directory
 `%t/class-checker` and exports it as `TMPDIR`. Playwright therefore keeps its
@@ -206,7 +249,7 @@ enrollment-window files after the same success gate used by the cart cleanup.
 
 The `--burst-minutes`, `--burst-interval`, and `--interval` options make the
 cadence explicit for future semesters. This change does not give the bounded
-worker priority over the hourly full-update timer; overlapping services still
+worker priority over the scheduled full-update timer; overlapping services still
 serialize through `data/.crawl.lock` under the documented lock-wait policy.
 
 Use `--dry-run` to inspect the exact schedule without writing units or starting

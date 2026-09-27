@@ -2,7 +2,10 @@
 Description=Automatic Update for SNU Class Checker
 
 [Timer]
-OnCalendar=Mon..Fri *-*-* 09..20:00:00
+# Three publishes a day, weekends included (owner's choice, 2026-09-27): the
+# GitHub collector samples around the clock inside its windows, and a
+# weekday-only schedule used to hold Friday-evening data until Monday.
+OnCalendar=*-*-* 06,12,18:00:00
 Persistent=true
 
 [Install]

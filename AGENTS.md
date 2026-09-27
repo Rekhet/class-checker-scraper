@@ -28,7 +28,7 @@ minutes → `.github/workflows/collect-counts.yml` on
 **github.com/Rekhet/class-checker-scraper** (this repository's public remote)
 → `scraper/cloud_collect.py` crawls and pushes `count_samples` to the cloud
 Turso database (`turso-remote.env`, untracked, holds the credentials). The
-local hourly `scripts/update.sh` merges those samples back via
+local `scripts/update.sh` (06:00, 12:00, 18:00 daily) merges those samples back via
 `scraper/pull_counts.py`, copies the newest sample onto the catalog's volatile
 columns via `python -m scraper.sync_counts`, and exports. It does **not** crawl
 sugang: the scheduled run is merge + publish only, and `UPDATE_CRAWL=1` is the

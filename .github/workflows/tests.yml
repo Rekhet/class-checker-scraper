@@ -1,0 +1,38 @@
+# Unit tests on every push and pull request.
+#
+# Pushing main deploys the collector (collect-counts.yml checks out main), so
+# this cannot gate that deploy; it makes a broken push visible within minutes
+# and mails the owner, instead of waiting for the next collection failure.
+# The suite runs offline (no sugang, no Turso).
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --extra turso --extra speed --extra export --extra dev
+
+      - name: Shell script syntax
+        run: bash -n scripts/*.sh refresh.sh serve.sh flush.sh
+
+      - name: Unit tests
+        run: uv run pytest -q tests

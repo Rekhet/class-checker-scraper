@@ -1,5 +1,7 @@
 [Unit]
 Description=SNU Class Checker data update
+# A failure opens (or comments on) a GitHub issue; the log stays local.
+OnFailure=class-checker-alert@%n.service
 
 [Service]
 Type=oneshot
@@ -7,6 +9,10 @@ WorkingDirectory=%h/project/class-checker
 RuntimeDirectory=class-checker
 RuntimeDirectoryMode=0700
 Environment=TMPDIR=%t/class-checker
+# A oneshot has no start timeout by default: a hung pull or push would hold
+# data/.crawl.lock (and every later run) indefinitely. A normal run takes
+# about a minute; an opt-in UPDATE_CRAWL=1 refresh, several.
+TimeoutStartSec=45min
 # A persistent timer replays a missed activation on resume, before the link is
 # up; wait for the hosts the run needs instead of dying on the first lookup.
 ExecStartPre=%h/project/class-checker/scripts/wait-online.sh

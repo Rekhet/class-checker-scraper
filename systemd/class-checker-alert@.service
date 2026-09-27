@@ -1,0 +1,7 @@
+[Unit]
+Description=Report failure of %i (GitHub issue, local log)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/project/class-checker
+ExecStart=%h/project/class-checker/scripts/notify-failure.sh %i

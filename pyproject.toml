@@ -26,7 +26,7 @@ speed = ["lxml>=5.0"]
 turso = ["libsql>=0.1"]
 # Browser binary for Playwright is installed separately, not via pip:
 #   playwright install chromium
-dev = []
+dev = ["pytest>=8"]
 export = [
     "openpyxl>=3.1",
 ]
@@ -39,7 +39,7 @@ build-backend = "setuptools.build_meta"
 # (import db, import crawl, ...). Map that directory so the project stays
 # importable when installed in editable mode for development.
 [tool.setuptools]
-py-modules = ["cloud_collect", "crawl", "db", "excel", "migrate_to_turso", "parse", "process_lock", "pull_counts", "server", "session"]
+py-modules = ["changelog", "cloud_collect", "crawl", "db", "excel", "export", "export_json", "flush", "migrate_to_turso", "parse", "process_lock", "pull_counts", "server", "session", "slots", "sync_counts", "windows"]
 
 [tool.setuptools.package-dir]
 "" = "scraper"

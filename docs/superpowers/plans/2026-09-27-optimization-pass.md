@@ -43,9 +43,9 @@ next GitHub Actions runner pass.
 | 9 | Export: stop rewriting unchanged files (`generated` churn) | done |
 | 10 | Trend change-point format + client decoder, LRU window cache, time-based X axis, KST timestamps | done |
 | 11 | Client boot: cacheable assets, parallel partials, `loadMore` sort cache | done (catalog slimming deferred, see log) |
-| 12 | Features: share URLs + detail→trend, change feed, vacancy alerts, dark mode + a11y | pending |
-| 13 | Ops: publish timer 06/12/18, `OnFailure` → GitHub issue, `TimeoutStartSec`, weekly backup | pending |
-| 14 | CI: test workflow, `dev` extra with pytest | pending |
+| 12 | Features: share URLs + detail→trend, change feed, vacancy alerts, dark mode + a11y | done |
+| 13 | Ops: publish timer 06/12/18, `OnFailure` → GitHub issue, `TimeoutStartSec`, weekly backup | done |
+| 14 | CI: test workflow, `dev` extra with pytest | done (first CI run pending at commit time) |
 | 15 | Docs drift fixes and a semester rollover checklist | pending |
 | 16 | Cleanup: disable finished-window units, move unused files to attic | pending |
 | 17 | Experiment: requests-only session mint with Playwright fallback | pending |
@@ -142,3 +142,34 @@ next GitHub Actions runner pass.
 - Deferred: columnar/slim catalog files. The wire saving is ~23% (373 KB →
   286 KB gzipped for 2026-2) while every consumer of `termRows` reads the row
   objects; not worth the risk in this pass.
+
+### Item 12: web features (2026-09-27, web 9400e09 · affa2f3 · 8e2e127 · 96bdff3)
+
+- Share links: `#search/…`, `#class/…`, `#trend/…`; a search link reproduces
+  the same result count and form state in a fresh page (test).
+- Change feed: selection checked against an independent Python computation
+  over the decoded live file for 3 h / 24 h / whole window × open/all.
+- Seat alerts: a routed live payload moving a watched class from 0 to 3
+  seats raises exactly one notification and a toast; the watch survives a
+  reload. A concurrency bug (double alert when two checks overlap) was found
+  by that test under load and fixed by serializing the checks.
+- Dark mode + keyboard: result cards, timetable blocks and chips work by
+  keyboard; the drawer is a modal dialog with focus return; theme cycles
+  and persists (tests). `el()` had been dropping every aria-*/role attribute.
+- web/tests: 24 passed on 3 consecutive runs; the deployed site (96bdff3)
+  loads the trend page with 0 errors.
+
+### Items 13–14: operations and CI (2026-09-27)
+
+- `class-checker.update.timer` now `*-*-* 06,12,18:00:00`; reinstalling it
+  replayed the missed 18:00 slot immediately (run succeeded, web 20860cb).
+- Failure alerts verified end to end with a transient unit running
+  `/bin/false` and `OnFailure=class-checker-alert@…`: the first failure
+  opened issue #1 (time, result `exit-code`, status 1, local log path; no
+  log text), the second commented on it; closed as a test. `--search` was
+  replaced with a plain listing because the search index lags.
+- First real backup: `turso-20260927-225918.db.xz`, 55.6 MB, 405 s,
+  7,247,169 samples; `backup.timer` next Sun 2026-10-04 04:30.
+- `update.service`: `TimeoutStartSec=45min`.
+- CI: `.github/workflows/tests.yml` (bash -n on scripts, pytest offline);
+  `dev` extra with pytest in uv.lock; `py-modules` lists every module.

@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly compressed backup of the class-checker catalog
+OnFailure=class-checker-alert@%n.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/project/class-checker
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=2h
+ExecStart=%h/project/class-checker/scripts/backup-db.sh

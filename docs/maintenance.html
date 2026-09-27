@@ -15,8 +15,9 @@
   <p class="lead">Keeping the catalog fresh, recovering fall timing, backups, and the
      handful of failure modes worth recognising.</p>
 
-  <h2 id="hourly">Hourly update: merge, overlay, publish</h2>
-  <p>The hourly <code>class-checker.update.timer</code> does <strong>not</strong>
+  <h2 id="hourly">Scheduled update: merge, overlay, publish</h2>
+  <p>The <code>class-checker.update.timer</code> (06:00, 12:00, 18:00 every day
+     since 2026-09-27; hourly on weekdays 09–20 before) does <strong>not</strong>
      crawl sugang. The 10-minute 인원 pass runs on GitHub-hosted runners
      (cron-job.org → <code>collect-counts.yml</code> →
      <code>scraper/cloud_collect.py</code> → cloud Turso), so
@@ -59,7 +60,7 @@
   <h2 id="cadence">Refresh cadence</h2>
   <p>Two passes, two rhythms — the server does <strong>not</strong> self-schedule; drive
      these from <code>cron</code>, a timer, or the admin button. The crawling
-     passes below are now manual or bounded-window work; the hourly timer only
+     passes below are now manual or bounded-window work; the scheduled timer only
      merges and publishes.</p>
   <div class="table-wrap"><table>
     <tr><th>Pass</th><th>Cost</th><th>Suggested cadence</th></tr>
@@ -70,7 +71,7 @@
         <td>Light — one paginated roster/term; commits locally per run</td>
         <td>Often during registration (e.g. every few minutes)</td></tr>
   </table></div>
-  <pre><code><span class="cmt"># hourly merge + publish timer (no crawl)</span>
+  <pre><code><span class="cmt"># merge + publish timer, 06/12/18 daily (no crawl)</span>
 systemctl --user enable --now class-checker.update.timer
 
 <span class="cmt"># one-off catalog + 평가방식 crawl, then publish (cart excluded)</span>
@@ -107,13 +108,13 @@ UPDATE_CRAWL=1 ./scripts/update.sh
      through the 16:30 end time. The current three-date window therefore has
      52 runs per date and 156 runs total. The cadence options are explicit in
      the installation command so a future semester can reproduce the same
-     schedule. They do not change shared-lock ordering against the hourly full
+     schedule. They do not change shared-lock ordering against the scheduled full
      update.</p>
   <p>Frequent bounded trend runs commit their generated JSON in the public
-     <code>web/</code> repository but do not push each commit. The hourly
+     <code>web/</code> repository but do not push each commit. The
      <code>class-checker.update.timer</code> performs the full update and is the
-     scheduled push boundary, publishing the accumulated local commits once per
-     hour. This keeps the trend cadence independent from remote publication
+     scheduled push boundary, publishing the accumulated local commits at each
+     run. This keeps the trend cadence independent from remote publication
      cadence.</p>
   <p>The worker service templates create the private user-runtime directory
      <code>%t/class-checker</code> and export it as <code>TMPDIR</code>, keeping
@@ -199,18 +200,27 @@ TMPDIR="$TEST_TMPDIR" python3 -m unittest \
      <strong>time-assigned %</strong> panel.</p>
 
   <h2 id="backup">Backups</h2>
-  <p>The catalog is a single file. Back it up by copying it (ideally while no crawl is
-     writing):</p>
-  <pre><code>cp data/classes.db  backups/classes-$(date +%F).db   <span class="cmt"># SQLite</span>
-cp data/turso.db    backups/turso-$(date +%F).db     <span class="cmt"># local libSQL</span></code></pre>
+  <p><code>class-checker.backup.timer</code> takes a weekly online snapshot of
+     <code>data/turso.db</code> (SQLite backup API, safe while the updater
+     writes), checks it, and keeps the newest three as
+     <code>~/.backup/class-checker/turso-&lt;time&gt;.db.xz</code> (xz -9e,
+     1.37&nbsp;GB → ~61&nbsp;MB). Run one on demand with
+     <code>scripts/backup-db.sh</code>; restore with
+     <code>xz -dc &lt;archive&gt; &gt; data/turso.db</code> while no unit runs.
+     Never copy a database into <code>backups/</code>: that directory is
+     tracked in a public repository (<code>.gitignore</code> excludes
+     <code>*.db</code> and <code>*.env*</code> there since 2026-09-27, but a
+     backup does not belong in the working tree).</p>
   <p>Recovery artifacts are kept under <code>backups/</code> in the private
      automation repository. The June cleanup archive
      <code>backups/class-checker-june-samples-20260804.jsonl.gz</code> contains
      177,120 historical samples from 2026-06-21 through 2026-06-23. It is not
      imported by scheduled workers; restore it only as an explicit recovery
      operation.</p>
-  <p>A rebuild is always reproducible from SNU, so backups are convenience, not
-     safety. <code>crawl_runs</code> retains the history of every refresh.</p>
+  <p>The catalog itself can be rebuilt from SNU, but <code>count_samples</code>
+     — the enrollment history as it happened — cannot: the backups are its only
+     copy outside the cloud collector, which holds just the current semester.
+     <code>crawl_runs</code> retains the history of every refresh.</p>
 
   <h2 id="deps">Updating &amp; verifying</h2>
   <pre><code><span class="cmt"># refresh dependencies after a pull</span>
@@ -245,6 +255,8 @@ curl -s http://127.0.0.1:8011/api/status | python3 -m json.tool</code></pre>
         <td>The cloud <code>classes</code> table has no rows for <code>COUNT_YEAR</code>/<code>COUNT_SEM</code> — a new semester whose roster was never seeded. Crawl it locally, then re-seed (systemd/README.md → Semester rollover). Nothing is pushed until then.</td></tr>
     <tr><td>Runner fails with <code>live pass matched N/M classes … not pushing</code></td>
         <td>The live search returned far less than the seeded roster (maintenance page, changed markup, IP block); the pass is discarded rather than recorded. Threshold <code>COUNT_MIN_COVERAGE</code> (default 0.95). A healthy pass prints <code>coverage: 100.00%</code>. Reproduce without writing anything: <code>python -m scraper.cloud_collect --year … --semester … --dry-run</code> with <code>turso-remote.env</code> sourced.</td></tr>
+    <tr><td>GitHub issue <code>ops-alert: &lt;unit&gt; failed</code></td>
+        <td>A scheduled update or backup failed. The issue holds only the time, result and the path of the local log (<code>data/logs/failures/</code>); read that file, fix, then close the issue. Further failures of the same unit comment on the open issue.</td></tr>
     <tr><td>Port already in use</td>
         <td>Another server instance is running — change <code>PORT</code> or stop the old process.</td></tr>
   </table></div>

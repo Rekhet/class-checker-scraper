@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly class-checker catalog backup
+
+[Timer]
+# Sunday before the first publish of the day; replayed after downtime.
+OnCalendar=Sun *-*-* 04:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
