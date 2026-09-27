@@ -5,6 +5,10 @@ and the NEW rows after, then diff. Each change is one line prefixed by a short c
 (NEW, TADD, TCHG, PROF, QUOTA, ...) so the file stays compact and searchable
 (`grep TCHG update_*.log`). A one-line summary (counts per code) goes to the main
 log; the per-class detail goes to data/logs/update_<run>.log.
+
+Only a catalog crawl writes these (UPDATE_CRAWL=1 or a manual refresh). The
+scheduled merge-and-publish run does not crawl, so it logs to the journal
+alone; failed runs leave their journal excerpt in data/logs/failures/.
 """
 from __future__ import annotations
 

@@ -7,6 +7,14 @@ Implemented on 2026-09-04. Verified locally with two `PUBLISH_GIT=0` runs of
 scheduled activation (the 11:00 timer run and a post-resume catch-up
 activation) was still pending when this document was written.
 
+Closed 2026-09-27 from the user journal: 136 scheduled activations completed
+successfully between 2026-09-05 and 2026-09-25, including post-resume catch-up
+runs. Three failed — 09-08 18:32 (push failed after three attempts), 09-18
+20:34 (offline), 09-21 09:31 (terminated by a signal) — each followed by a
+successful next slot; none was noticed at the time, which is why failure
+alerts were added (2026-09-27 optimization pass). The schedule itself changed
+to 06:00/12:00/18:00 daily on 2026-09-27.
+
 ## Context
 
 The 10-minute 인원 collection moved to GitHub-hosted runners

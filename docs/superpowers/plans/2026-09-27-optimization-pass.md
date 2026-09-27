@@ -45,9 +45,9 @@ next GitHub Actions runner pass.
 | 11 | Client boot: cacheable assets, parallel partials, `loadMore` sort cache | done (catalog slimming deferred, see log) |
 | 12 | Features: share URLs + detail→trend, change feed, vacancy alerts, dark mode + a11y | done |
 | 13 | Ops: publish timer 06/12/18, `OnFailure` → GitHub issue, `TimeoutStartSec`, weekly backup | done |
-| 14 | CI: test workflow, `dev` extra with pytest | done (first CI run pending at commit time) |
-| 15 | Docs drift fixes and a semester rollover checklist | pending |
-| 16 | Cleanup: disable finished-window units, move unused files to attic | pending |
+| 14 | CI: test workflow, `dev` extra with pytest | done |
+| 15 | Docs drift fixes and a semester rollover checklist | done |
+| 16 | Cleanup: disable finished-window units, move unused files to attic | done |
 | 17 | Experiment: requests-only session mint with Playwright fallback | pending |
 
 ## Verification log
@@ -173,3 +173,27 @@ next GitHub Actions runner pass.
 - `update.service`: `TimeoutStartSec=45min`.
 - CI: `.github/workflows/tests.yml` (bash -n on scripts, pytest offline);
   `dev` extra with pytest in uv.lock; `py-modules` lists every module.
+- CI: the first tests.yml run failed at collection (`No module named
+  'scraper'`: the plain `pytest` entry point does not put the root on
+  sys.path); fixed with `[tool.pytest.ini_options] pythonpath`, next run
+  179 passed. A collect-counts run on the new lock succeeded (coverage 100%).
+
+### Items 15–16: docs drift, cleanup (2026-09-27)
+
+- Fixed: `docs/crawl.html` slot default (10 → 60), `docs/maintenance.html`
+  "backups are convenience" (count_samples cannot be re-collected) and the
+  `cp … backups/` advice, `systemd/README.md` "collect.env edit is enough"
+  (now a rollover checklist), hourly-schedule wording across the docs and
+  AGENTS.md, the 2026-09-04 crawl-removal plan's open "pending" (closed with
+  journal evidence), `changelog.py` (which runs write `data/logs/update_*`).
+- Disabled `class-checker.cart@20260804.timer` and
+  `class-checker.cart-cleanup@20260804.timer` (their window ended 08-05).
+- Moved to `~/.backup/class-checker/attic/class-checker-attic-20260927.tar.xz`
+  (8.9 MB, 414 entries, listing checked before deletion): the June request
+  captures at the root, `data/classes.db` (stale SQLite catalog, still the
+  default only for `DB_BACKEND=sqlite`), the scratch `cloud-collect*.db`, and
+  406 `data/logs/update_*.log` files; removed the empty `_scrape/`,
+  `.test-tmp/`.
+- Side effect to note: `systemctl --user reset-failed` was run without a unit
+  name and also cleared the failed flag of two unrelated user units
+  (`snu-feed.service`, an IBus service); their journals are unchanged.
