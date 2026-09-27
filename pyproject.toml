@@ -43,3 +43,9 @@ py-modules = ["changelog", "cloud_collect", "crawl", "db", "excel", "export", "e
 
 [tool.setuptools.package-dir]
 "" = "scraper"
+
+[tool.pytest.ini_options]
+# tests import the package as `scraper` and `scripts` from the repository root;
+# `python -m pytest` adds the root to sys.path, the plain `pytest` entry point
+# (as CI runs it) does not.
+pythonpath = ["."]
