@@ -230,3 +230,21 @@ would also be small: on the runner the cached Chromium install step takes
 - Semantics to know: over the whole semester the start (8/4) falls in the
   cart-only window where 신청 was not collected, so "여석이 생긴 강좌" there
   compares against no starting value and lists every class now open.
+
+### Follow-up: why 14 days loaded slower than the whole semester (2026-09-28)
+
+- Cause: for a bounded period the feed learned where an archive chunk starts
+  only by downloading it, so it walked back one chunk per round trip
+  (14 days = 7 chunks in series); the whole semester already fetched all 16
+  at once. The earlier 0.57 s semester figure was also measured after the
+  14-day run had cached half its chunks.
+- Fix: the class index carries `trendArchiveStarts` (first pass per chunk,
+  epoch s); the feed picks the needed chunks up front and fetches them
+  together (scraper 36db56c, web b4fcd6a · 51371cf). A dropped request under that
+  parallel load ("Failed to fetch", seen once on the deployed site) is now
+  retried up to three times instead of failing the feed.
+- Cold-cache medians on the deployed site (fresh browser context per
+  period, 3 runs, two rounds): sequential 3d 41–182 ms, 7d 126–394 ms,
+  14d 354–611 ms; parallel 3d 55–81 ms, 7d 70–115 ms, 14d 169–182 ms,
+  semester 553–586 ms.
+- Also: the header title links to the site root (`./`), clearing any route.
