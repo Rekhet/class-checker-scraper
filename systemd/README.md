@@ -96,8 +96,10 @@ deliberately excludes `cart`. A bounded cart worker uses `cart`, while a
 bounded enrollment worker uses `enrollment`. When both live groups are
 selected, they share one search pass and do not issue duplicate count requests.
 `COUNT_YEAR`, `COUNT_SEM`, `COUNT_MODE`, `COLLECTION_TIMEZONE`, and the
-`*_WINDOWS` values in `collect.env` remain the canonical runtime configuration;
-edit that file for a future semester, then run `systemctl --user daemon-reload`.
+`*_WINDOWS` values in `collect.env` remain the canonical runtime configuration.
+The GitHub collector reads `COUNT_YEAR`/`COUNT_SEM` from the same file (since
+2026-09-27; it used to hard-code 2026 fall). A new semester still takes more
+than that one edit — see "Semester rollover" below.
 
 The full-update wrapper reads `COUNT_YEAR` and `COUNT_SEM` from the same file.
 For an intentional one-off full refresh, `UPDATE_CRAWL=1` enables the crawl and
@@ -120,6 +122,25 @@ set -a; . ./turso-remote.env; set +a
 
 `make migrate-remote` targets the separate production database in
 `prod-admin.env`, not the collector's.
+
+## Semester rollover
+
+Nothing below happens on its own. In order:
+
+1. Read the new term's schedule on the sugang landing page (co010) and rewrite
+   the `collect.env` header comment and `CART_WINDOWS`, `ENROLL_WINDOWS`,
+   `ENROLL_SLOW_WINDOWS`. Set `COUNT_YEAR`/`COUNT_SEM`; both the local scripts
+   and the GitHub collector read them from there.
+2. Crawl the new term's catalog locally:
+   `UPDATE_CRAWL=1 UPDATE_YEAR=<year> UPDATE_SEM=<sem> ./scripts/update.sh`.
+3. Re-seed the collector's cloud roster from the local catalog (the command
+   above). Until this is done every runner pass fails with "cloud roster ...
+   is empty" — by design, instead of recording empty passes.
+4. If a cart window is configured, arm the bounded cart units (below); cart is
+   never collected on the GitHub runner.
+5. Commit and push `collect.env`. Pushing `main` is what deploys it to the
+   runner. Confirm the next runner pass prints `coverage: 100.00%` or close to it.
+6. Run `systemctl --user daemon-reload` if any unit file changed.
 
 ## Bounded two-day cart collection
 

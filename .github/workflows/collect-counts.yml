@@ -1,13 +1,15 @@
 # Periodic 인원 추이 (enrollment counts) collection on GitHub-hosted runners.
 #
-# Every run is gated by collect.env: outside every CART/ENROLL window the
-# --windowed pass exits without crawling, so the schedule can stay enabled
-# year-round at negligible cost. Samples land in the cloud Turso database
-# (secrets TURSO_DATABASE_URL + TURSO_AUTH_TOKEN); the local machine pulls
-# them via an embedded replica (TURSO_SYNC_PATH) for export/publish.
+# Every run is gated by collect.env: outside every ENROLL window the gate step
+# skips setup and crawl alike, so the schedule can stay enabled year-round at
+# negligible cost. Samples land in the cloud Turso database (secrets
+# TURSO_DATABASE_URL + TURSO_AUTH_TOKEN); the local machine merges them with
+# scraper/pull_counts.py for export/publish.
 #
 # NOTE: GitHub cron is best-effort — runs routinely start several minutes
 # late under load. The cadence is "about every 10 minutes", not exact.
+# cron-job.org's workflow_dispatch is the primary trigger; `schedule` stays
+# as the backup should that service stop dispatching.
 name: collect-counts
 
 on:
@@ -26,18 +28,34 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # print() lines reach the log as they happen instead of all at exit
+      PYTHONUNBUFFERED: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      # Stdlib-only window check BEFORE any install: outside every window —
+      # most of the year — a run then costs a checkout and nothing else.
+      # scraper/windows.py mirrors crawl._window_active (parity-tested in
+      # tests/test_windows.py).
+      - name: Collection window gate
+        id: gate
+        run: |
+          set -a; . ./collect.env; set +a
+          python3 scraper/windows.py gate
+
+      - uses: astral-sh/setup-uv@v10
+        if: steps.gate.outputs.active == 'true'
         with:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --extra turso --extra speed --extra export
+        if: steps.gate.outputs.active == 'true'
+        run: uv sync --locked --extra turso --extra speed
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        if: steps.gate.outputs.active == 'true'
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('uv.lock') }}
@@ -47,15 +65,20 @@ jobs:
       # stale index ("Hash Sum mismatch", 2026-09-09 17:30~17:50 UTC). The
       # ubuntu-latest image already ships Chromium's shared libraries.
       - name: Install Chromium
+        if: steps.gate.outputs.active == 'true'
         run: uv run playwright install chromium
 
       # cloud_collect bootstraps a local scratch DB from the cloud catalog,
       # crawls against it (a long-lived remote connection would hit Turso's
       # interactive-stream expiry), then pushes the samples back in batches.
+      # Year and semester come from collect.env, the file that also sets the
+      # windows, so a semester rollover is one edit there (plus re-seeding
+      # the cloud roster; see systemd/README.md).
       - name: Collect windowed counts
+        if: steps.gate.outputs.active == 'true'
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: |
           set -a; . ./collect.env; set +a
-          uv run python -m scraper.cloud_collect --year 2026 --semester fall
+          uv run python -m scraper.cloud_collect --year "$COUNT_YEAR" --semester "$COUNT_SEM"

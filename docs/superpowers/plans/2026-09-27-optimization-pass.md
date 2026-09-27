@@ -34,7 +34,7 @@ next GitHub Actions runner pass.
 |---|------|--------|
 | 1 | `.gitignore`: cover `backups/*.env*`, `backups/*.db` | done |
 | 2 | Collector: overlay `count_latest` onto the scratch roster, fail on empty/low-coverage fetch, re-raise sampling errors on the cloud path, fail on empty roster | done (pending runner verification) |
-| 3 | Workflow: year/semester from `collect.env`, window gate before setup, `PYTHONUNBUFFERED`, `uv sync --locked`, Node 24 action versions | pending |
+| 3 | Workflow: year/semester from `collect.env`, window gate before setup, `PYTHONUNBUFFERED`, `uv sync --locked`, Node 24 action versions | done (pending runner verification) |
 | 4 | `_slow_slot_minutes` default 60 (matches docs and collect.env) | done (pending runner verification) |
 | 5 | `server.py`: reject cross-origin POSTs when no admin token is set | pending |
 | 6 | Turso: `classes(year, term)` index, keyframe partial index, bootstrap copies only the latest keyframe | pending |
