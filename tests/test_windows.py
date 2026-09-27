@@ -122,8 +122,11 @@ class StalenessWarningTests(unittest.TestCase):
 
 class StaleExitCodeTests(unittest.TestCase):
     def test_fail_if_stale_reports_a_distinct_exit_code(self) -> None:
-        env = dict(SEOUL, CART_WINDOWS="", ENROLL_SLOW_WINDOWS="",
-                   ENROLL_WINDOWS=windows.today_iso())
+        # "today" in the collection timezone: a host in UTC is a day behind
+        # Seoul between 00:00 and 09:00 KST (this failed on CI at 02:00 KST)
+        with patch.dict(os.environ, SEOUL, clear=False):
+            today = windows.today_iso()
+        env = dict(SEOUL, CART_WINDOWS="", ENROLL_SLOW_WINDOWS="", ENROLL_WINDOWS=today)
         with patch.dict(os.environ, env, clear=False), \
              patch("scraper.sync_counts.db.connect") as connect, \
              patch("scraper.sync_counts.db.apply_latest_samples",
