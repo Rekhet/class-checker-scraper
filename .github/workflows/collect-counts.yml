@@ -44,7 +44,8 @@ jobs:
           set -a; . ./collect.env; set +a
           python3 scraper/windows.py gate
 
-      - uses: astral-sh/setup-uv@v10
+      # setup-uv stopped publishing floating major tags at v8: pin the release.
+      - uses: astral-sh/setup-uv@v10.2.0
         if: steps.gate.outputs.active == 'true'
         with:
           enable-cache: true
