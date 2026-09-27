@@ -48,7 +48,13 @@ curl 'http://127.0.0.1:8011/api/search?name=경제&level=학사&day=0'</code></p
 
   <h2 id="refresh">Write / refresh endpoints</h2>
   <p>Run a background crawl thread; poll <code>/api/status</code> for live progress.
-     Gated by <code>X-Admin-Token</code> when <code>ADMIN_TOKEN</code> is set.</p>
+     Gated by <code>X-Admin-Token</code> when <code>ADMIN_TOKEN</code> is set.
+     Every POST — token or not — is refused with <code>403</code> when a browser marks
+     it as coming from another site (<code>Origin</code> not matching <code>Host</code>,
+     or <code>Sec-Fetch-Site</code> other than <code>same-origin</code>/<code>none</code>),
+     and, without a token, when <code>Host</code> is not a loopback name (DNS rebinding).
+     <code>curl</code> and other non-browser clients send neither header and are
+     unaffected. <code>/api/lookup</code> accepts at most 2,000 keys.</p>
   <div class="table-wrap"><table>
     <tr><th>Endpoint</th><th>Body</th><th>Action</th></tr>
     <tr><td><span class="badge post">POST</span> <code>/api/refresh</code></td><td><code>{years,terms}</code></td><td>Full Excel rebuild + timing recovery + counts for the scoped terms</td></tr>

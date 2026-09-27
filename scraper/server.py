@@ -44,6 +44,9 @@ HOST = os.environ.get("HOST", "127.0.0.1")
 # Preferred port; if taken, scan upward to the next free one (Vite-style).
 PORT = int(os.environ.get("PORT", "8000"))
 PORT_SCAN_LIMIT = int(os.environ.get("PORT_SCAN_LIMIT", "50"))
+# /api/lookup re-syncs saved timetables; a real one holds tens of classes, and
+# several sheets a few hundred. The cap only stops an unbounded request.
+LOOKUP_MAX_KEYS = 2000
 CONTENT_TYPES = {".html": "text/html; charset=utf-8",
                  ".js": "text/javascript; charset=utf-8",
                  ".css": "text/css; charset=utf-8",
@@ -233,8 +236,36 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(WEB_DIR / u.path.lstrip("/"))
         return self._json({"error": "not found"}, 404)
 
+    def _same_origin(self) -> bool:
+        """Refuse POSTs a browser sends on behalf of ANOTHER site.
+
+        With no ADMIN_TOKEN every write endpoint is open to anything that can
+        reach the port — and a page open in the developer's browser can: a
+        text/plain form POST needs no CORS preflight, so it could trigger
+        /api/refresh (wipe + rebuild) or append a rule to a tracked curated
+        map that the public export then applies. Browsers mark such requests
+        (Origin, Sec-Fetch-Site); non-browser clients like curl send neither
+        and are unaffected. Without a token the Host header must also be a
+        loopback name, which closes DNS rebinding onto 127.0.0.1.
+        """
+        host = (self.headers.get("Host") or "").strip().lower()
+        origin = (self.headers.get("Origin") or "").strip().lower()
+        site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if site and site not in ("same-origin", "none"):
+            return False
+        if origin and origin not in (f"http://{host}", f"https://{host}"):
+            return False
+        if not ADMIN_TOKEN:
+            name = (host.split("]")[0] + "]" if host.startswith("[")
+                    else host.rsplit(":", 1)[0])
+            if name not in ("127.0.0.1", "localhost", "[::1]"):
+                return False
+        return True
+
     def do_POST(self):
         u = urlparse(self.path)
+        if not self._same_origin():
+            return self._json({"error": "cross-origin request refused"}, 403)
         if SERVE_STATIC and u.path.startswith("/api/"):
             return self._json({"error": "not found"}, 404)
         if u.path == "/api/refresh":
@@ -325,8 +356,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _lookup(self):
         payload = self._read_json_body()
+        raw = payload.get("keys", [])
+        if not isinstance(raw, list) or len(raw) > LOOKUP_MAX_KEYS:
+            return self._json(
+                {"error": f"keys must be a list of at most {LOOKUP_MAX_KEYS}"}, 400)
         keys = [(str(k[0]), str(k[1]), str(k[2]), str(k[3]))
-                for k in payload.get("keys", [])
+                for k in raw
                 if isinstance(k, (list, tuple)) and len(k) == 4]
         conn = db.connect()
         self._json({"classes": db.lookup(conn, keys)})

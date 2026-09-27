@@ -33,10 +33,10 @@ next GitHub Actions runner pass.
 | # | Item | Status |
 |---|------|--------|
 | 1 | `.gitignore`: cover `backups/*.env*`, `backups/*.db` | done |
-| 2 | Collector: overlay `count_latest` onto the scratch roster, fail on empty/low-coverage fetch, re-raise sampling errors on the cloud path, fail on empty roster | done (pending runner verification) |
-| 3 | Workflow: year/semester from `collect.env`, window gate before setup, `PYTHONUNBUFFERED`, `uv sync --locked`, Node 24 action versions | done (pending runner verification) |
-| 4 | `_slow_slot_minutes` default 60 (matches docs and collect.env) | done (pending runner verification) |
-| 5 | `server.py`: reject cross-origin POSTs when no admin token is set | pending |
+| 2 | Collector: overlay `count_latest` onto the scratch roster, fail on empty/low-coverage fetch, re-raise sampling errors on the cloud path, fail on empty roster | done |
+| 3 | Workflow: year/semester from `collect.env`, window gate before setup, `PYTHONUNBUFFERED`, `uv sync --locked`, Node 24 action versions | done |
+| 4 | `_slow_slot_minutes` default 60 (matches docs and collect.env) | done |
+| 5 | `server.py`: reject cross-origin POSTs when no admin token is set | done |
 | 6 | Turso: `classes(year, term)` index, keyframe partial index, bootstrap copies only the latest keyframe | pending |
 | 7 | Turso: `count_samples` UNIQUE key, `INSERT OR IGNORE` push/pull, pull reuses `db.fold_pass_into_latest` | pending |
 | 8 | Keyframe pushes only changed `count_latest` rows | pending |
@@ -67,3 +67,16 @@ next GitHub Actions runner pass.
 - Runner gate: `python3 scraper/windows.py gate` with collect.env prints
   `active=true` today (slow window) and `active=false` with the slow window
   cleared; parity with `crawl._window_active` is tested over 8 cases.
+- Runner verification: run 36319941361 on 2da30e8 (workflow_dispatch,
+  2026-09-27 12:43Z) succeeded — `active=true`, `bootstrap … classes 8652`,
+  `overlay … updated 8652`, `coverage: 100.00%`, `push: passes 1`. The first
+  dispatch on 5c6d76e failed at action resolution: setup-uv publishes no
+  floating `v10` tag, fixed by pinning `v10.2.0` (2da30e8). Step timings
+  match the previous code (collect 2:15 vs 2:09).
+
+### Item 5: server.py cross-origin POSTs (2026-09-27)
+
+- Against a real dev server on port 8765 (local turso.db): curl without
+  Origin → 200; `Origin: https://evil.example` on `/api/lookup` and on a
+  `text/plain` `/api/refresh` → 403; a same-origin `fetch()` from the page in
+  headless Chromium → 200 with real class rows.
