@@ -215,3 +215,18 @@ would also be small: on the runner the cached Chromium install step takes
   not 8,652.
 - First scheduled 06:00 publish (2026-09-28) under the new timer.
 - First scheduled weekly backup (2026-10-04 04:30).
+
+### Follow-up: change feed paging and history (2026-09-28, web 63fb6f1 · f640150)
+
+- Owner request: see more than the top 50, and look further back than the
+  live window. The feed now appends 50 rows per '더 보기' and offers 3/7/14
+  days and the whole semester, joining the archive windows it needs into one
+  change-point series (window-edge re-statements dropped; a window that did
+  not collect a metric carries its last value).
+- A test checks 3 h / 24 h / 7 days / semester × open/all against an
+  independent computation over the decoded windows; web/tests 25 passed ×3.
+- Deployed site: 3 days 0.23 s, 7 days 0.51 s, 14 days 0.95 s, whole
+  semester 2.3 s sequentially → 0.57 s after fetching all windows in parallel.
+- Semantics to know: over the whole semester the start (8/4) falls in the
+  cart-only window where 신청 was not collected, so "여석이 생긴 강좌" there
+  compares against no starting value and lists every class now open.
