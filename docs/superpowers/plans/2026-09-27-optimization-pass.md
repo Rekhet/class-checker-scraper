@@ -101,9 +101,8 @@ next GitHub Actions runner pass.
 - Real pull with the new code: 17,443 rows / 315 passes merged in 85 s, 0
   duplicate keys afterwards, and local `count_latest` for 2026-2 matches the
   cloud's exactly (8,652 rows, 0 mismatches).
-- Pending: the first scheduled keyframe on the runner after deployment
-  (~2026-09-28 13:12 KST) should log `push: … latest:` in single or double
-  digits rather than 8,652.
+- Verified 2026-09-28: the first scheduled keyframe on the runner after
+  deployment (13:12:34 KST) rewrote 2 `count_latest` rows (was 8,652).
 
 ### Items 9–10: export churn, trend v2 (2026-09-27)
 
