@@ -39,7 +39,7 @@ next GitHub Actions runner pass.
 | 5 | `server.py`: reject cross-origin POSTs when no admin token is set | done |
 | 6 | Turso: `classes(year, term)` index, keyframe partial index, bootstrap copies only the latest keyframe | done |
 | 7 | Turso: `count_samples` UNIQUE key, `INSERT OR IGNORE` push/pull, pull reuses `db.fold_pass_into_latest` | done |
-| 8 | Keyframe pushes only changed `count_latest` rows | done (keyframe push pending runner verification ~2026-09-28 13:12 KST) |
+| 8 | Keyframe pushes only changed `count_latest` rows | done |
 | 9 | Export: stop rewriting unchanged files (`generated` churn) | done |
 | 10 | Trend change-point format + client decoder, LRU window cache, time-based X axis, KST timestamps | done |
 | 11 | Client boot: cacheable assets, parallel partials, `loadMore` sort cache | done (catalog slimming deferred, see log) |
@@ -210,11 +210,16 @@ would also be small: on the runner the cached Chromium install step takes
 
 ## Pending live checks
 
-- First scheduled keyframe on the runner after 975ff7e (≈2026-09-28 13:12
-  KST): its log should show `push: … latest:` in single or double digits,
-  not 8,652.
-- First scheduled 06:00 publish (2026-09-28) under the new timer.
-- First scheduled weekly backup (2026-10-04 04:30).
+- DONE 2026-09-28: first scheduled keyframe on the runner after 975ff7e
+  (pass 2026-09-28T13:12:34, full=1) rewrote 2 `count_latest` rows in the
+  cloud (was 8,652 per keyframe).
+- DONE 2026-09-28: scheduled publishes at 06:00 and 12:00 under the new
+  timer both finished successfully (12:00: 38 passes pulled, drift check
+  "already handled", current-term export).
+- PENDING: first scheduled weekly backup (2026-10-04 04:30).
+- PENDING (from 2026-10-01): pull the 2026-09-04 13:52–16:09 samples
+  stranded in the quota-exhausted old cloud database, then retire its
+  credential file.
 
 ### Follow-up: change feed paging and history (2026-09-28, web 63fb6f1 · f640150)
 
