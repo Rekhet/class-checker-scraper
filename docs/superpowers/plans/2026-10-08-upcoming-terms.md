@@ -102,3 +102,38 @@ Cost of one catalog + grading read: 5 Excel requests per term. 2027 1학기
 
 - 2026-10-08 18:00 KST scheduled run: both upcoming terms crawled, exit 0,
   web pushed (including `2e42e96`).
+
+## Move to remote collection (owner, 2026-10-08, same day)
+
+The owner asked for the upcoming-term crawl to run remotely, with this
+machine only pulling and publishing (scope: upcoming terms only; current-term
+drift re-crawl, rollover, and 장바구니 stay local for now). The local crawl
+above stays on until the remote one is verified.
+
+Design:
+
+- The runner cannot write upcoming classes into the cloud `classes` table:
+  `reseed_roster` copies LOCAL class ids there, and runner-inserted rows would
+  collide. Instead each term is one row of a new table `catalog_snapshots`
+  (zlib JSON of the parsed Excel records + 평가방식 sets; 2027 1학기 ≈ 90 KB,
+  a full 2학기 ≈ 315 KB). An unchanged term only updates `checked_at`, so a
+  run costs one cloud row write per term.
+- `.github/workflows/collect-catalog.yml` runs
+  `python -m scraper.catalog_snapshot collect` at 05:20/11:20/17:20 KST
+  (GitHub `schedule`) and on dispatch. Refuses (and fails the run) on an empty
+  term, no 평가방식 tags, or < 90% of the previous snapshot's classes.
+- `python -m scraper.catalog_snapshot pull` rebuilds each term whose digest
+  differs from the last applied one, like a local crawl (classes, slots with
+  rooms, 평가방식, change log, crawl_runs). It exits 3 when a snapshot has not
+  been refreshed for 30 h (stopped schedule, including GitHub disabling it
+  after 60 days without repository activity).
+- `crawl.refresh_grading` was split so `grading_methods` /
+  `grading_switchable` serve both paths.
+
+Steps done:
+
+- Cloud schema: `catalog_snapshots` created with
+  `python -m scraper.catalog_snapshot init-remote` before pushing code that
+  writes it; local `data/turso.db` via `init_schema`.
+- Local dry run of `collect` against sugang: 2026 겨울학기 212 classes / 212
+  graded, 2027 1학기 3,952 / 3,952, 7 s.

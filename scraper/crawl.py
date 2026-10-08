@@ -401,6 +401,37 @@ def _check_grading_codes(client: SnuClient, year: str) -> None:
         log.exception("MRKS_GV_MTHD live-code check failed")
 
 
+def _grading_sweep(client: SnuClient, year: str, term: str, extra: dict,
+                   slot_label: str, *, label: str = "",
+                   progress: ProgressFn | None = None) -> set[tuple]:
+    """Keys of the classes one filtered Excel download returns."""
+    if progress:
+        progress({"phase": "grading", "term": term, "label": label,
+                  "slot_label": slot_label})
+    content = excel.fetch_excel(client, year, term, extra=extra)
+    recs = excel.parse_excel(content, year, term) if content else []
+    return {(c["sbjt_cd"], c["lt_no"], c["subh_cd"]) for c in recs}
+
+
+def grading_methods(client: SnuClient, year: str, term: str, *, label: str = "",
+                    progress: ProgressFn | None = None) -> dict[tuple, str]:
+    """(sbjt_cd, lt_no, subh_cd) -> 성적부여형태, from one sweep per code."""
+    _check_grading_codes(client, year)
+    methods: dict[tuple, str] = {}
+    for code, grading in GRADING_CODES:
+        for k in _grading_sweep(client, year, term, {"srchMrksGvMthd": code},
+                                f"평가방식 {grading}", label=label, progress=progress):
+            methods[k] = grading
+    return methods
+
+
+def grading_switchable(client: SnuClient, year: str, term: str, *, label: str = "",
+                       progress: ProgressFn | None = None) -> set[tuple]:
+    """Keys of the classes whose 평가방식 can be switched (전환가능)."""
+    return _grading_sweep(client, year, term, GRADING_SWITCH_PARAM,
+                          "평가방식 전환가능", label=label, progress=progress)
+
+
 def refresh_grading(conn, client: SnuClient, year: str, term: str, *,
                     label: str = "", progress: ProgressFn | None = None) -> dict:
     """Tag each class's 평가방식 + 전환가능여부. Neither field appears as a column
@@ -411,21 +442,7 @@ def refresh_grading(conn, client: SnuClient, year: str, term: str, *,
     HTML search is hard-capped at 10 rows/page, so Excel is the only full sweep.)
     All keys are collected first and applied in one shot, so a failed download
     changes nothing."""
-    _check_grading_codes(client, year)
-
-    def sweep(extra: dict, slot_label: str) -> set[tuple]:
-        if progress:
-            progress({"phase": "grading", "term": term, "label": label,
-                      "slot_label": slot_label})
-        content = excel.fetch_excel(client, year, term, extra=extra)
-        recs = excel.parse_excel(content, year, term) if content else []
-        return {(c["sbjt_cd"], c["lt_no"], c["subh_cd"]) for c in recs}
-
-    methods: dict[tuple, str] = {}
-    for code, grading in GRADING_CODES:
-        for k in sweep({"srchMrksGvMthd": code}, f"평가방식 {grading}"):
-            methods[k] = grading
-
+    methods = grading_methods(client, year, term, label=label, progress=progress)
     total = conn.execute("SELECT COUNT(*) FROM classes WHERE year=? AND term=?",
                          (year, term)).fetchone()[0]
     if total and not methods:
@@ -435,7 +452,8 @@ def refresh_grading(conn, client: SnuClient, year: str, term: str, *,
         raise RuntimeError(
             f"grading sweep for {year}/{term} returned 0 classes "
             f"(term has {total}); leaving existing tags untouched")
-    switchable = sweep(GRADING_SWITCH_PARAM, "평가방식 전환가능")
+    switchable = grading_switchable(client, year, term, label=label,
+                                    progress=progress)
 
     tagged = db.apply_grading(conn, year, term, methods, switchable)
     untagged = conn.execute(

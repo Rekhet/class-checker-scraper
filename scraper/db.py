@@ -17,6 +17,21 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "classes.db"
 
+# Upcoming terms' catalog, one row per term (scraper/catalog_snapshot.py). The
+# cloud copy is written by the collect-catalog runner; the local copy records
+# the snapshot last applied to `classes`.
+CATALOG_SNAPSHOTS_DDL = """CREATE TABLE IF NOT EXISTS catalog_snapshots (
+    year       TEXT NOT NULL,
+    term       TEXT NOT NULL,
+    label      TEXT NOT NULL,
+    digest     TEXT NOT NULL,       -- sha256 of the uncompressed payload
+    classes    INTEGER NOT NULL,
+    fetched_at TEXT NOT NULL,       -- UTC; when this content was first seen
+    checked_at TEXT NOT NULL,       -- UTC; last run that read the term
+    payload    BLOB NOT NULL,       -- zlib(JSON: classes, grading, switchable)
+    PRIMARY KEY (year, term)
+);"""
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS terms (
     term   TEXT NOT NULL,            -- 20-char cmmnCd (year-independent code!)
@@ -65,6 +80,8 @@ CREATE TABLE IF NOT EXISTS class_slots (
     -- room is in the key: one meeting held in two rooms at once is two rows
     UNIQUE(class_id, day_index, start_time, end_time, room)
 );
+
+""" + CATALOG_SNAPSHOTS_DDL + """
 
 CREATE TABLE IF NOT EXISTS crawl_runs (
     id          INTEGER PRIMARY KEY,

@@ -1,0 +1,57 @@
+# Upcoming terms' catalog + 평가방식 on GitHub-hosted runners.
+#
+# sugang lists a coming term's catalog weeks before its timetable. The terms in
+# collect.env UPCOMING_TERMS (minus COUNT_YEAR/COUNT_SEM, which has its own
+# collection) are read here and stored one row per term in the cloud table
+# catalog_snapshots (scraper/catalog_snapshot.py). The local scheduled update
+# (06:00, 12:00, 18:00 KST) pulls changed terms and publishes; it does not
+# crawl them. A failed term fails this run, which e-mails the owner.
+#
+# Runs at 05:20, 11:20, 17:20 KST, ahead of each local update. GitHub cron is
+# best-effort (often minutes late); the local pull reports a snapshot that
+# has not been refreshed for 30 h, which also covers GitHub disabling the
+# schedule after 60 days without repository activity.
+name: collect-catalog
+
+on:
+  schedule:
+    - cron: "20 20,2,8 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: collect-catalog
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --extra turso --extra speed
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
+      # No --with-deps: see collect-counts.yml (apt index failures).
+      - name: Install Chromium
+        run: uv run playwright install chromium
+
+      - name: Collect upcoming terms
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          set -a; . ./collect.env; set +a
+          uv run python -m scraper.catalog_snapshot collect
