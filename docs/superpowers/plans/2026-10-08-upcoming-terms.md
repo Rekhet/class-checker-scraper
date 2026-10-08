@@ -164,12 +164,17 @@ table (~116k rows) against the plan's write quota. Usage could not be checked
 (`open_local`, refuses a URL), with a regression test; AGENTS.md now states
 that `db.connect()` is the cloud whenever the cloud credentials are sourced.
 
-## Pending live verification
+## Live verification after the cutover
 
-- Next scheduled `collect-catalog` run (2026-10-08 17:20 KST, GitHub
-  `schedule`): both terms `unchanged`, run green.
 - 2026-10-08 18:00 KST local update: `catalog snapshots: 2 term(s), applied
-  []`, exit 0.
+  []`, finished 18:00:47, exit 0.
+- First GitHub `schedule` run of `collect-catalog`: 2026-10-08 15:41 UTC
+  (00:41 KST), success, both terms `checked_at` refreshed. The 08:20 UTC
+  (17:20 KST) slot did not fire on time — the run came 7 h 21 m late, after
+  the 18:00 local update. GitHub cron is best-effort (the reason
+  collect-counts is dispatched by cron-job.org); the 30 h stale bar absorbs
+  this, but a cron-job.org dispatch would make the schedule reliable (owner
+  action, not done).
 
 Checked 2026-10-08 after the owner logged in the `turso` CLI: database
 `class-checker` (`libsql://class-checker-jasonr.aws-ap-northeast-1.turso.io`)
