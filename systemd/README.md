@@ -207,6 +207,37 @@ since the last crawl — live `375.803(042)` and `552.439(002)` missing from the
 catalog — was marked handled this way as the baseline, per the owner (no more
 catalog crawls this semester).
 
+## Upcoming terms
+
+sugang lists a coming term's catalog and 평가방식 weeks before its timetable,
+rooms, or counts (sampled 2026-10-08: 2026 겨울 212 classes, 2027 1학기 3,952;
+수업교시, 수업형태, and 강의실 empty in both the Excel and the search, every
+count 0). `UPCOMING_TERMS` in `collect.env` (`"2026:winter 2027:spring"` since
+2026-10-08) lists those terms, and every `update.sh` run re-reads each one:
+
+    refresh.sh --year Y --collect catalog,grading --no-search-timing --min-keep 0.9 SEM
+
+- Catalog + grading only: no counts, and no search-timing sweep (the search
+  carries no times either, so it would page through the whole term for
+  nothing). About ten requests and 15–30 s per term.
+- `--min-keep 0.9` downloads the Excel first and refuses, touching nothing, an
+  Excel with fewer than 90% of the classes stored for the term; an empty or
+  truncated reply would otherwise wipe it and publish it empty.
+- A term equal to `COUNT_YEAR`/`COUNT_SEM` is skipped (it has its own
+  collection). A failed term is retried once after 30 s (the usual cause is a
+  session-mint timeout, before anything is wiped); if the retry fails too the
+  run still publishes and then exits 1, so `notify-failure.sh` opens or
+  comments on the ops-alert issue. A malformed entry fails the run the same way.
+- Any successful upcoming crawl exports every term (`EXPORT_SCOPE=all`), so a
+  new term reaches `index.json` and the explore index. The full export takes
+  about 10–20 s.
+- When the timetable appears, the next run picks the times up from the Excel;
+  nothing needs switching. The web already shows time-less classes as
+  시간미정 / TBA.
+
+When a listed term becomes the collected term (rollover below), remove it from
+`UPCOMING_TERMS`.
+
 ## Semester rollover
 
 Nothing below happens on its own. In order:
@@ -225,6 +256,8 @@ Nothing below happens on its own. In order:
 5. Commit and push `collect.env`. Pushing `main` is what deploys it to the
    runner. Confirm the next runner pass prints `coverage: 100.00%` or close to it.
 6. Run `systemctl --user daemon-reload` if any unit file changed.
+7. Remove the new collected term from `UPCOMING_TERMS` and add any term sugang
+   has started listing (see Upcoming terms).
 
 ## Bounded two-day cart collection
 

@@ -57,6 +57,28 @@
        <code>scraper/migrate_to_turso.py --src data/turso.db</code> under
        <code>turso-remote.env</code> if the roster itself changed.</p></div>
 
+  <h2 id="upcoming">Upcoming terms (catalog before the timetable)</h2>
+  <p><code>UPCOMING_TERMS</code> in <code>collect.env</code>
+     (<code>"2026:winter 2027:spring"</code> since 2026-10-08) makes every
+     scheduled run re-read those terms' catalog and 평가방식 —
+     <code>refresh.sh --collect catalog,grading --no-search-timing --min-keep 0.9</code>,
+     15–30 s per term — and then export every term. The term being collected
+     (<code>COUNT_YEAR</code>/<code>COUNT_SEM</code>) is skipped. Details and
+     the rollover step: <code>systemd/README.md</code> → Upcoming terms.</p>
+  <ul>
+    <li><strong>Run ends with <code>error: published, but an upcoming-term crawl failed</code></strong>
+      — the crawl failed twice (30 s apart); publication still happened and the
+      term's stored catalog is unchanged. Read the journal: a
+      <code>Page.goto: Timeout</code> is sugang/network and clears on its own; a
+      <code>below --min-keep</code> RuntimeError means the Excel returned far
+      fewer classes than stored. If sugang really withdrew that many, rebuild
+      once without the guard:
+      <code>./refresh.sh --year Y --collect catalog,grading --no-search-timing SEM</code>.</li>
+    <li><strong><code>UPCOMING_TERMS entry … is not YEAR:…</code></strong> — fix
+      the entry; each is <code>YYYY:spring|summer|fall|winter</code>,
+      space-separated.</li>
+  </ul>
+
   <h2 id="cadence">Refresh cadence</h2>
   <p>Two passes, two rhythms — the server does <strong>not</strong> self-schedule; drive
      these from <code>cron</code>, a timer, or the admin button. The crawling

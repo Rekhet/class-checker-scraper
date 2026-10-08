@@ -57,6 +57,8 @@ Usage: $0 [options] <semester...>
     --no-search-timing   skip search-result timing recovery for lagging terms
     --force              forced past-term update: ignore collect.env windows,
                          sample 수강 인원 only (no 장바구니)
+    --min-keep RATIO     download every Excel first; refuse (touching nothing)
+                         a term with fewer than RATIO x its stored classes
 
 Examples
     $0 --year 2026 fall
@@ -74,6 +76,7 @@ ORIG_ARGS=("$@")
 while [ $# -gt 0 ]; do
   case "$1" in
     --collect)           EXTRA+=("$1" "$2"); collection_selected=1; shift 2;;
+    --min-keep)          EXTRA+=("$1" "$2"); shift 2;;
     --year)            IFS=', ' read -r -a _y <<< "$2"; years+=("${_y[@]}"); shift 2;;
     --counts-only|--cart-only|--windowed|--no-counts)
                        EXTRA+=("$1"); legacy_collection_mode=1; shift;;

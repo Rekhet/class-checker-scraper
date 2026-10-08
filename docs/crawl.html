@@ -185,6 +185,20 @@ ENROLL_SLOW_SLOT_MINUTES=60</code></pre>
        on the first hit — the fetch validates the <code>.xls</code> magic bytes and
        re-mints + retries automatically.</p></div>
 
+  <h3 id="upcoming">Terms listed before their timetable</h3>
+  <p>sugang lists a coming term well before its timetable. Sampled 2026-10-08
+     (2026 겨울학기, 2027 1학기): the Excel has every catalog column
+     (교과목번호, 강좌번호, 이름, 학점, 학년, 개설대학·학과, 이수과정·교과구분, 정원,
+     강의언어, 개설상태, 비고) and 주담당교수 for 67–72% of classes; the
+     평가방식 filtered sweeps partition the roster exactly (A~F + S/U = total);
+     the cc103 detail has 상대/절대평가 and professor e-mail but no 강의계획.
+     수업교시, 수업형태, and 강의실 are empty in the Excel <em>and</em> the search
+     results, and every count is 0. Such a term is crawled with
+     <code>--collect catalog,grading --no-search-timing</code> (the
+     search-timing sweep would page through the whole term and find no times)
+     and its classes export as 시간미정. See <code>UPCOMING_TERMS</code> in
+     <a href="maintenance.html#upcoming">maintenance</a>.</p>
+
   <h2 id="per-term">What a term refresh does</h2>
   <ol class="steps">
     <li>Wipe only this <code>(year, term)</code> — other semesters stay intact.</li>
@@ -213,6 +227,7 @@ ENROLL_SLOW_SLOT_MINUTES=60</code></pre>
     <tr><td><code>--windowed</code></td><td>Skip before any network work when the selected live metric windows are inactive.</td></tr>
     <tr><td><code>--no-counts</code></td><td>Excel (+ timing recovery) only; skip the count overlay.</td></tr>
     <tr><td><code>--no-search-timing</code></td><td>Skip the cell sweep even when the Excel timing is missing.</td></tr>
+    <tr><td><code>--min-keep RATIO</code></td><td>Catalog rebuild guard: download every Excel first and refuse, wiping nothing, one with fewer than <code>RATIO</code> × the classes stored for its term (the scheduled upcoming-term crawl uses <code>0.9</code>).</td></tr>
     <tr><td><code>--workers</code></td><td>Concurrent cell fetchers for the timing sweep (default <code>6</code>).</td></tr>
   </table></div>
 

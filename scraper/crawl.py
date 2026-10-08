@@ -487,16 +487,18 @@ def crawl_term(conn, client: SnuClient, year: str, term: str, *,
                collect_cart: bool = False, collect_enrollment: bool = True,
                collect_grading: bool = True,
                search_timing: bool = True,
-               progress: ProgressFn | None = None) -> dict:
+               progress: ProgressFn | None = None,
+               content: bytes | None = None) -> dict:
     """Rebuild one term from its Excel (catalog + exact slots). Where the Excel has
     no time (it lags), recover timing from the live search results. Then overlay
     the selected live metrics. Excel timing always overrides the search-derived
-    timing."""
+    timing. `content` is an Excel the caller already downloaded (and checked)."""
     db.upsert_term(conn, term, year, label or f"{year} {term}")
-    if progress:
-        progress({"phase": "excel", "term": term, "label": label,
-                  "slot_label": "엑셀 다운로드"})
-    content = excel.fetch_excel(client, year, term)
+    if content is None:
+        if progress:
+            progress({"phase": "excel", "term": term, "label": label,
+                      "slot_label": "엑셀 다운로드"})
+        content = excel.fetch_excel(client, year, term)
     recs = excel.parse_excel(content, year, term) if content else []
 
     classes = slot_rows = timeless = 0
@@ -558,13 +560,40 @@ def crawl_term(conn, client: SnuClient, year: str, term: str, *,
             "grading_tagged": grading["tagged"]}
 
 
+def _checked_excels(conn, client: SnuClient, plan: list[dict],
+                    min_keep: float) -> dict[tuple, bytes]:
+    """Download each planned term's Excel and refuse one that shrank below
+    `min_keep` x the classes stored for that term. Runs before any wipe."""
+    out: dict[tuple, bytes] = {}
+    for p in plan:
+        year, term = p["year"], p["term"]
+        content = excel.fetch_excel(client, year, term)
+        fresh = len(excel.parse_excel(content, year, term)) if content else 0
+        stored = conn.execute(
+            "SELECT COUNT(*) FROM classes WHERE year=? AND term=?",
+            (year, term)).fetchone()[0]
+        if stored and fresh < stored * min_keep:
+            raise RuntimeError(
+                f"{year}/{term}: Excel has {fresh} classes, {stored} stored "
+                f"(below --min-keep {min_keep}); term left untouched")
+        out[(year, term)] = content
+    return out
+
+
 def refresh_all(conn, years: list[str], terms: list[str] | None = None, *,
                 mint: Callable[[], dict] = snu_session.mint_session,
                 live_counts: bool = True, search_timing: bool = True,
                 force: bool = False, progress: ProgressFn | None = None,
                 collect_cart: bool = False, collect_enrollment: bool = True,
-                collect_grading: bool = True) -> dict:
-    """Rebuild the selected terms and run the selected catalog/live/grading steps."""
+                collect_grading: bool = True,
+                min_keep: float | None = None) -> dict:
+    """Rebuild the selected terms and run the selected catalog/live/grading steps.
+
+    `min_keep` guards the wipe: every term's Excel is downloaded first, and if
+    one has fewer than `min_keep` x the classes stored for it, nothing is wiped
+    and the run fails. An empty or truncated Excel reply would otherwise
+    replace a good term with nothing (fetch_excel returns b"" for a reply that
+    looks like an empty term)."""
     if not live_counts:
         collect_cart = False
         collect_enrollment = False
@@ -585,6 +614,8 @@ def refresh_all(conn, years: list[str], terms: list[str] | None = None, *,
                    if not collect_cart else {})
     total_classes = total_slots = total_timeless = total_recovered = 0
     try:
+        prefetched = (_checked_excels(conn, client, plan, min_keep)
+                      if min_keep is not None else {})
         # Snapshot the OLD rows before the wipe so we can diff after the rebuild.
         old_snap = changelog.snapshot(conn, year_terms)
         db.clear_terms(conn, year_terms)
@@ -598,7 +629,8 @@ def refresh_all(conn, years: list[str], terms: list[str] | None = None, *,
                                collect_enrollment=collect_enrollment,
                                collect_grading=collect_grading,
                                search_timing=search_timing,
-                               progress=progress)
+                               progress=progress,
+                               content=prefetched.get((p["year"], p["term"])))
             total_classes += stats["classes"]
             total_slots += stats["slots"]
             total_timeless += stats["timeless"]
@@ -745,6 +777,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--force", action="store_true",
                     help="forced past-term update: ignore collection windows, "
                          "sample 수강 인원 only (no 장바구니)")
+    ap.add_argument("--min-keep", type=float, default=None, metavar="RATIO",
+                    help="catalog rebuild: download every Excel first and refuse "
+                         "(touching nothing) one with fewer than RATIO x the "
+                         "stored classes, e.g. 0.9")
     ap.add_argument("--yes", action="store_true",
                     help="skip the re-collect confirmation when a term is already 마감(closed)")
     return ap
@@ -828,6 +864,7 @@ def main(argv: list[str] | None = None) -> int:
                     search_timing=not args.no_search_timing,
                     force=args.force,
                     progress=prog,
+                    min_keep=args.min_keep,
                 )
             elif live and "grading" in selected:
                 out = {

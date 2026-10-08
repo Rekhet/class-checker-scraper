@@ -109,6 +109,43 @@ if [ "$UPDATE_CRAWL" != "1" ] && [ "$PULL_FAILED" = "0" ] && [ -f "$ROOT/turso-r
   fi
 fi
 
+# Upcoming terms (collect.env UPCOMING_TERMS, e.g. "2026:winter 2027:spring"):
+# sugang publishes a term's catalog and 평가방식 long before its timetable, so
+# each run re-reads them — catalog + grading only, no counts, no search-timing
+# sweep (the search has no times either), about ten requests per term. The
+# collected term itself is skipped: it has its own collection. --min-keep
+# refuses an Excel that shrank below 90% of the stored term before anything is
+# wiped, so a bad reply cannot publish an empty term. A failure never blocks
+# publication; it fails the run at the end (alert).
+UPCOMING_FAILED=0
+UPCOMING_CRAWLED=0
+for entry in ${UPCOMING_TERMS:-}; do
+  up_year="${entry%%:*}"
+  up_sem="${entry#*:}"
+  if ! [[ "$up_year" =~ ^[0-9]{4}$ ]] \
+      || ! [[ "$up_sem" =~ ^(spring|summer|fall|winter)$ ]]; then
+    UPCOMING_FAILED=1
+    echo "warn: UPCOMING_TERMS entry '$entry' is not YEAR:spring|summer|fall|winter" >&2
+    continue
+  fi
+  if [ "$up_year" = "$UPDATE_YEAR" ] && [ "$up_sem" = "$UPDATE_SEM" ]; then
+    echo "upcoming $entry is the collected term; skipped"
+    continue
+  fi
+  # One retry: the usual failure is a transient session-mint timeout, which
+  # happens before anything is wiped.
+  for attempt in 1 2; do
+    if PY="$PY" "$ROOT/refresh.sh" --year "$up_year" --collect catalog,grading \
+        --no-search-timing --min-keep "${UPCOMING_MIN_KEEP:-0.9}" "$up_sem"; then
+      UPCOMING_CRAWLED=1
+      continue 2
+    fi
+    [ "$attempt" = 1 ] && sleep "${UPCOMING_RETRY_DELAY:-30}"
+  done
+  UPCOMING_FAILED=1
+  echo "warn: upcoming-term crawl failed for $entry; publishing without it" >&2
+done
+
 # Copy the newest sample onto the catalog's volatile columns: the static export
 # reads them off `classes`, which no longer moves on its own without a crawl.
 # With no fresh input this run, ask it to report staleness as an exit code.
@@ -128,15 +165,21 @@ elif [ "$sync_status" != "0" ]; then
 fi
 
 # Without a crawl only the collected term moved (counts overlay + trend), so
-# only it is exported; a crawl may change any term and the explore index.
+# only it is exported; a crawl (or an upcoming-term crawl, which can add a
+# whole new term to index.json) may change any term and the explore index.
 EXPORT_SCOPE="current"
 [ "$UPDATE_CRAWL" = "1" ] && EXPORT_SCOPE="all"
+[ "$UPCOMING_CRAWLED" = "1" ] && EXPORT_SCOPE="all"
 YEAR="$UPDATE_YEAR" SEM="$UPDATE_SEM" EXPORT_SCOPE="$EXPORT_SCOPE" \
 PUBLISH_COMMIT_MESSAGE="${PUBLISH_COMMIT_MESSAGE:-chore(data): update}" \
   "$ROOT/scripts/publish.sh" full
 
 if [ "$DRIFT_FAILED" = "1" ]; then
   echo "error: published, but the catalog drift crawl failed" >&2
+  exit 1
+fi
+if [ "$UPCOMING_FAILED" = "1" ]; then
+  echo "error: published, but an upcoming-term crawl failed" >&2
   exit 1
 fi
 if [ "$SYNC_STALE" = "1" ]; then

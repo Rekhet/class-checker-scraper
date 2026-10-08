@@ -313,6 +313,57 @@ class CountsPipelineTests(unittest.TestCase):
                 row = conn.execute("SELECT cart FROM classes").fetchone()
                 self.assertEqual(row[0], 7)
 
+    def _guarded_refresh(self, conn, excel_rows: int):
+        """refresh_all with min_keep=0.9 against a fake Excel of `excel_rows`."""
+        client = type("Client", (), {"fetch_terms": lambda *_args: [{
+            "year": "2026", "term": "fall", "label": "2026 2학기"}]})()
+        recs = [{"sbjt_cd": f"C{i:03}"} for i in range(excel_rows)]
+        seen = {}
+
+        def rebuild(conn, _client, _year, _term, **kwargs):
+            seen["content"] = kwargs.get("content")
+            return {"classes": 0, "slots": 0, "timeless": 0, "recovered": 0,
+                    "counts_updated": 0, "grading_tagged": 0}
+
+        with patch.object(crawl, "SnuClient", return_value=client), \
+             patch.object(crawl.excel, "fetch_excel", return_value=b"xls") as fetch, \
+             patch.object(crawl.excel, "parse_excel", return_value=recs), \
+             patch.object(crawl, "crawl_term", side_effect=rebuild), \
+             patch.object(crawl.changelog, "write_run_log", return_value=None):
+            crawl.refresh_all(conn, ["2026"], terms=["fall"], live_counts=False,
+                              collect_grading=False, search_timing=False,
+                              min_keep=0.9)
+        return fetch, seen
+
+    def test_min_keep_refuses_a_shrunken_excel_before_wiping_the_term(self) -> None:
+        # An empty or truncated Excel reply must not wipe a stored term: the
+        # scheduled upcoming-term crawl would otherwise publish it empty.
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._connection_with_class(Path(tmp) / "test.db") as conn:
+                with self.assertRaisesRegex(RuntimeError, "min-keep"):
+                    self._guarded_refresh(conn, excel_rows=0)
+
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM classes").fetchone()[0], 1)
+                run = conn.execute(
+                    "SELECT status FROM crawl_runs ORDER BY id DESC").fetchone()
+                self.assertEqual(run[0], "error")
+
+    def test_min_keep_reuses_the_checked_excel_for_the_rebuild(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._connection_with_class(Path(tmp) / "test.db") as conn:
+                fetch, seen = self._guarded_refresh(conn, excel_rows=1)
+
+                self.assertEqual(fetch.call_count, 1)
+                self.assertEqual(seen["content"], b"xls")
+
+    def test_min_keep_argument_is_a_ratio(self) -> None:
+        args = crawl.parse_args(["--years", "2026", "--terms", "fall",
+                                 "--collect", "catalog,grading",
+                                 "--min-keep", "0.9"])
+        self.assertEqual(args.min_keep, 0.9)
+        self.assertIsNone(crawl.parse_args(["--years", "2026"]).min_keep)
+
     def test_collection_argument_selects_components(self) -> None:
         args = crawl.parse_args([
             "--years", "2026",
