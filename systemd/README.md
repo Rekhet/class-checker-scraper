@@ -168,7 +168,10 @@ and 평가방식 stay as the last crawl left them, and a class missing from the
 cloud roster is never counted there. Run `UPDATE_CRAWL=1 ./scripts/update.sh`
 after a timetable change. If the roster itself changed, re-seed the collector's
 cloud catalog too (this refills terms/classes/class_slots/crawl_runs and leaves
-`count_samples` untouched):
+`count_samples` untouched; its `init_schema` first rebuilds a cloud `class_slots`
+that predates the per-meeting `room` column, which is one more full write of
+that table). `scraper.reseed_roster` does not migrate the cloud: it sends one
+room-less row per meeting time.
 
 ```sh
 set -a; . ./turso-remote.env; set +a

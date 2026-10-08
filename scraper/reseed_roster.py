@@ -49,7 +49,10 @@ def reseed(local, remote, *, year: str, term: str, force: bool = False) -> dict:
     for i in range(0, len(ids), 500):
         chunk = ids[i:i + 500]
         slots += local.execute(
-            "SELECT class_id, day_index, period, start_time, end_time FROM class_slots "
+            # DISTINCT drops the per-meeting room: the cloud keeps the
+            # room-less slot table (its UNIQUE key has no room column).
+            "SELECT DISTINCT class_id, day_index, period, start_time, end_time "
+            "FROM class_slots "
             f"WHERE class_id IN ({','.join('?' * len(chunk))})", chunk).fetchall()
     remote.execute(
         "DELETE FROM class_slots WHERE class_id IN "

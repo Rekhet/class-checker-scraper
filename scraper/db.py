@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import unicodedata
 from pathlib import Path
@@ -60,7 +61,9 @@ CREATE TABLE IF NOT EXISTS class_slots (
     period     INTEGER,             -- derived: start hour - 8 (08:00 -> 0)
     start_time TEXT,                -- "09:00"
     end_time   TEXT,                -- "10:15" (exact, from the Excel 수업교시 column)
-    UNIQUE(class_id, day_index, start_time, end_time)
+    room       TEXT NOT NULL DEFAULT '',  -- this meeting's 동-호; '' = unknown
+    -- room is in the key: one meeting held in two rooms at once is two rows
+    UNIQUE(class_id, day_index, start_time, end_time, room)
 );
 
 CREATE TABLE IF NOT EXISTS crawl_runs (
@@ -245,6 +248,9 @@ class _Conn:
     def commit(self):
         self._raw.commit()
 
+    def rollback(self):
+        self._raw.rollback()
+
     def close(self):
         self._raw.close()
 
@@ -319,6 +325,23 @@ _TERM_LABEL_CASE = (
 )
 
 
+def _add_slot_room(conn) -> None:
+    """Rebuild a pre-room class_slots with the room column (every existing row
+    gets '' = unknown). SQLite cannot widen a UNIQUE constraint in place, so the
+    table is copied into the current definition taken from SCHEMA."""
+    ddl = re.search(r"CREATE TABLE IF NOT EXISTS class_slots \(.*?\n\);",
+                    SCHEMA, re.S).group(0)
+    cols = "class_id, day_index, period, start_time, end_time"
+    conn.executescript(
+        "BEGIN;"
+        + ddl.replace("class_slots (", "class_slots_new (", 1)
+        + f"INSERT INTO class_slots_new ({cols}) SELECT {cols} FROM class_slots;"
+        "DROP TABLE class_slots;"
+        "ALTER TABLE class_slots_new RENAME TO class_slots;"
+        "COMMIT;")
+    conn.executescript(SCHEMA)   # recreates idx_slots_cell, dropped with the old table
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     # migrate old cell-crawl class_slots (slot_code, no end_time) -> exact-time
@@ -327,6 +350,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     if cols and "end_time" not in cols:
         conn.execute("DROP TABLE class_slots")
         conn.executescript(SCHEMA)
+    elif cols and "room" not in cols:
+        _add_slot_room(conn)
     # add newer columns to older catalogs; NULL until the next Excel refresh
     ccols = [r[1] for r in conn.execute("PRAGMA table_info(classes)").fetchall()]
     if ccols and "grade" not in ccols:
@@ -564,13 +589,13 @@ def upsert_class(conn: sqlite3.Connection, rec: dict) -> int:
 
 
 def add_slot(conn: sqlite3.Connection, class_id: int, slot: dict) -> bool:
-    """Attach one meeting block (day/start/end) to a class. True if newly added."""
+    """Attach one meeting block (day/start/end/room) to a class. True if newly added."""
     cur = conn.execute(
         "INSERT OR IGNORE INTO class_slots"
-        "(class_id, day_index, period, start_time, end_time)"
-        " VALUES (?,?,?,?,?)",
+        "(class_id, day_index, period, start_time, end_time, room)"
+        " VALUES (?,?,?,?,?,?)",
         (class_id, slot.get("day_index"), slot.get("period"),
-         slot.get("start_time"), slot.get("end_time")),
+         slot.get("start_time"), slot.get("end_time"), slot.get("room") or ""),
     )
     return cur.rowcount > 0
 
@@ -1160,8 +1185,9 @@ def _slots_by_id(conn: sqlite3.Connection, ids: list[int],
     for i in range(0, len(ids), batch):
         chunk = ids[i:i + batch]
         qs = ",".join("?" * len(chunk))
+        # DISTINCT: a meeting held in two rooms is two rows but one time slot
         rows = conn.execute(
-            f"SELECT class_id, day_index, period, start_time, end_time "
+            f"SELECT DISTINCT class_id, day_index, period, start_time, end_time "
             f"FROM class_slots WHERE class_id IN ({qs}) "
             f"ORDER BY day_index, start_time", chunk).fetchall()
         for s in rows:
@@ -1247,7 +1273,7 @@ def lookup(conn: sqlite3.Connection,
     ids = [c["id"] for c in classes]
     qs = ",".join("?" * len(ids))
     slots = conn.execute(
-        f"SELECT class_id, day_index, period, start_time, end_time "
+        f"SELECT DISTINCT class_id, day_index, period, start_time, end_time "
         f"FROM class_slots WHERE class_id IN ({qs}) ORDER BY day_index, start_time", ids,
     ).fetchall()
     by_id: dict[int, list] = {i: [] for i in ids}

@@ -38,6 +38,24 @@
     <li>If neither has a time → the class is <strong>시간미정 (TBA)</strong> and carries no slots.</li>
   </ul>
 
+  <h3 id="rooms">Rooms: one per meeting</h3>
+  <p>The Excel <code>강의실(동-호)</code> column lists one room per <code>수업교시</code> block,
+     in the same <code>/</code> order (<code>월(12:00~14:50)/화(11:00~12:15)</code> ↔
+     <code>3-213/3-116</code>), so each <code>class_slots</code> row carries the room that
+     meeting uses (<code>class_slots.room</code>). A block repeated with two rooms means the
+     class uses both at once and is stored as two rows; the UNIQUE key includes
+     <code>room</code> for that reason. If the two columns ever disagree in length, a single
+     distinct room still applies to every block, otherwise the room is <code>''</code>
+     (unknown), never guessed. Search-recovered timing has no room (<code>''</code>).
+     <code>classes.room</code> keeps the deduplicated list (<code>200-3220/200-1024</code>).</p>
+  <p>Readers that only need timing (search, export, lookup, the cloud roster reseed) select
+     <code>DISTINCT</code> day/start/end, so a two-room meeting is still one time slot there
+     and the exported JSON is unchanged. The cloud collector's <code>class_slots</code> keeps
+     its room-less shape.</p>
+  <p>Terms crawled before the room column existed were filled by
+     <code>scraper/backfill_rooms.py</code> (see maintenance → <a href="maintenance.html#rooms">room backfill</a>);
+     the Excel of every stored term back to 2020 still carries the column.</p>
+
   <div class="callout note"><span class="ic">⚙️</span>
     <p>The cell sweep is <strong>gated</strong>: it only runs for a term when the Excel
        has times for fewer than <strong>50%</strong> of its classes (the timetable
@@ -170,7 +188,7 @@ ENROLL_SLOW_SLOT_MINUTES=60</code></pre>
   <h2 id="per-term">What a term refresh does</h2>
   <ol class="steps">
     <li>Wipe only this <code>(year, term)</code> — other semesters stay intact.</li>
-    <li>Download &amp; parse the Excel → upsert every class with exact timing.</li>
+    <li>Download &amp; parse the Excel → upsert every class with exact timing and each meeting's room.</li>
     <li>If Excel timing is largely missing, sweep the 168 search cells (concurrently) and attach coarse timing to the time-less classes.</li>
     <li>Paginate the search roster and overlay the selected live metrics.</li>
   </ol>

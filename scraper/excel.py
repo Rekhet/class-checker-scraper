@@ -79,15 +79,40 @@ def _quota(v):
 _ROOM_COL = "강의실(동-호)(#연건, *평창)"   # header carries the campus legend (#=연건, *=평창)
 
 
+def _room_name(part: str) -> str:
+    """'38-422(무선랜제공)' -> '38-422'; ' ' -> ''."""
+    return re.sub(r"\(.*?\)", "", part).strip()
+
+
 def _room(raw: str) -> str:
     """'38-422(무선랜제공)/38-422/38-422' -> '38-422'; '/ /' -> ''. The column repeats
     the room per meeting; dedupe and drop the parenthetical notes."""
     seen: list[str] = []
     for part in (raw or "").split("/"):
-        p = re.sub(r"\(.*?\)", "", part).strip()
+        p = _room_name(part)
         if p and p not in seen:
             seen.append(p)
     return "/".join(seen)
+
+
+def _meetings(times: str, rooms: str) -> list[dict]:
+    """수업교시 blocks, each with the room it meets in.
+
+    The room column lists one entry per 수업교시 block, in the same '/' order
+    ('월(..)/화(..)' + '3-213/3-116'), and a block repeated with two rooms means
+    the class uses both at once. If the counts ever disagree the pairing is
+    unknown: a single distinct room still applies to every block, otherwise
+    each block gets '' rather than a guess."""
+    tparts = (times or "").split("/")
+    rparts = [_room_name(p) for p in (rooms or "").split("/")]
+    distinct = {r for r in rparts if r}
+    fallback = next(iter(distinct)) if len(distinct) == 1 else ""
+    aligned = len(tparts) == len(rparts)
+    out = []
+    for i, part in enumerate(tparts):
+        for block in slots.parse_blocks(part):
+            out.append({**block, "room": rparts[i] if aligned else fallback})
+    return out
 
 
 def parse_excel(content: bytes, year: str, term: str) -> list[dict]:
@@ -127,6 +152,6 @@ def parse_excel(content: bytes, year: str, term: str) -> list[dict]:
             "room": _room(g(r, _ROOM_COL)),
             "language": g(r, "강의언어"),       # '영어' / '한국어' / ...
             "status": g(r, "개설상태"),         # '설강' / '폐강대상'
-            "slots": slots.parse_blocks(g(r, "수업교시")),
+            "slots": _meetings(g(r, "수업교시"), g(r, _ROOM_COL)),
         })
     return out

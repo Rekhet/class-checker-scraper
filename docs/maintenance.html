@@ -199,6 +199,21 @@ TMPDIR="$TEST_TMPDIR" python3 -m unittest \
      rebuild overrides the coarse blocks automatically. Track progress in the
      <strong>time-assigned %</strong> panel.</p>
 
+  <h2 id="rooms">Room backfill</h2>
+  <p><code>class_slots.room</code> holds each meeting's room (see crawl →
+     <a href="crawl.html#rooms">rooms</a>). A catalog crawl fills it for the terms it
+     rebuilds; terms stored before the column existed are filled from their Excel without
+     rebuilding the roster:</p>
+<pre><code>DB_BACKEND=turso TURSO_DATABASE_URL=data/turso.db \
+  uv run python -m scraper.backfill_rooms [--years 2025,2026] [--terms CODE] [--dry-run]</code></pre>
+  <p>It takes the process lock (one Excel download per term, roughly a minute each), so run
+     it away from the 06/12/18 update. It only sets <code>classes.room</code> and rewrites a
+     class's slots when the Excel's meeting times equal the stored ones; per term it prints
+     <code>matched</code>, <code>unmatched</code> (Excel rows not in the catalog, never
+     inserted), and <code>timing_differs</code> (slots left alone). Re-running is harmless.
+     The first <code>init_schema</code> after this change rebuilds a pre-room
+     <code>class_slots</code> in place (existing rows get <code>room=''</code>).</p>
+
   <h2 id="backup">Backups</h2>
   <p><code>class-checker.backup.timer</code> takes a weekly online snapshot of
      <code>data/turso.db</code> (SQLite backup API, safe while the updater
