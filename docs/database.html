@@ -76,8 +76,13 @@
     <tr><td><code>day_index</code></td><td>0 = Mon … 6 = Sun</td></tr>
     <tr><td><code>period</code></td><td>derived: start hour − 8 (08:00 → 0)</td></tr>
     <tr><td><code>start_time, end_time</code></td><td><code>"09:00"</code>, <code>"10:15"</code></td></tr>
-    <tr><td colspan="2"><code>UNIQUE(class_id, day_index, start_time, end_time)</code></td></tr>
+    <tr><td><code>room</code></td><td>this meeting's 동-호; <code>''</code> = unknown (search-recovered timing, misaligned Excel columns)</td></tr>
+    <tr><td colspan="2"><code>UNIQUE(class_id, day_index, start_time, end_time, room)</code> — a meeting held in two rooms at once is two rows</td></tr>
   </table></div>
+  <p>Readers (<code>search</code>/export, <code>lookup</code>) return ONE slot per meeting
+     time with <code>room</code> joining its rooms by <code>/</code>, like
+     <code>classes.room</code>: <code>{"class_id", "day_index", "period", "start_time",
+     "end_time", "room"}</code> (<code>room</code> in the exported JSON since 2026-10-09).</p>
 
   <h3 id="t-other">terms &amp; crawl_runs</h3>
   <p><code>terms(term PK, year, label)</code> backs the semester selectors.

@@ -38,7 +38,10 @@ Made during implementation:
 - Timing readers (`search`/export, `lookup`, `reseed_roster`) select
   DISTINCT day/start/end: the exported JSON is unchanged and the cloud
   `class_slots` keeps its room-less shape (no cloud migration, no extra
-  cloud writes).
+  cloud writes). Superseded 2026-10-09 for search/export/lookup (see
+  "Export of per-meeting rooms"); `reseed_roster` still sends room-less rows.
+  The cloud table itself gained the column on 2026-10-08 by accident (see
+  the upcoming-terms plan, "Incident").
 - Past terms are filled by `scraper/backfill_rooms.py`, not by a catalog
   rebuild, so each old term's roster stays as it was crawled. Slots are
   rewritten only when the Excel meeting times equal the stored ones.
@@ -70,10 +73,28 @@ Made during implementation:
     the past-term pool adds no room that 2026 2학기 lacks. The Tue/Wed
     18:00–21:00 answers are unchanged with per-meeting rooms.
 
+## Export of per-meeting rooms (2026-10-09)
+
+Owner's order: the data format first, the screen design afterwards, together.
+
+- `db._slots_by_id` (search/export) and `db.lookup` return one slot per
+  meeting time with `room`: the rooms of that time joined by `/` (sorted,
+  deduplicated), `''` when unknown. Same shape as `classes.room`; one slot per
+  time so the existing timetable does not draw a two-room meeting twice. The
+  web validators ignore unknown keys, so the field is additive.
+- Export (all 29 terms, 16 s): `web/data/classes` 68,184 → 69,988 KB
+  (+2.6%). 2026 2학기: 7,898 slots, 7,154 with a room, 83 two-room slots;
+  10 classes have a class room but `''` slot rooms (the backfill's
+  timing-difference cases above).
+- Tests: `tests/test_slot_rooms.py` (joined room, `''` for unknown, slot
+  keys); full suite 242 passed; `web/tests` 32 passed with the two known
+  unrelated failures deselected (`test_grad_golden`, `test_change_feed`).
+
 ## Deferred
 
 - Time-picker empty-room search and a room pool that lists rooms seen in past
-  terms (labelled with the last term seen, as an estimate). Needs the slot
-  room in the export and a `web/` change, which is out of this scope.
+  terms (labelled with the last term seen, as an estimate). The slot room is
+  now exported; the screen is to be designed with the owner, then built in
+  `web/`.
 - `server.py` admin stats count `class_slots` rows, so a two-room meeting
   counts twice there.

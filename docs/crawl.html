@@ -48,10 +48,13 @@
      distinct room still applies to every block, otherwise the room is <code>''</code>
      (unknown), never guessed. Search-recovered timing has no room (<code>''</code>).
      <code>classes.room</code> keeps the deduplicated list (<code>200-3220/200-1024</code>).</p>
-  <p>Readers that only need timing (search, export, lookup, the cloud roster reseed) select
-     <code>DISTINCT</code> day/start/end, so a two-room meeting is still one time slot there
-     and the exported JSON is unchanged. The cloud collector's <code>class_slots</code> keeps
-     its room-less shape.</p>
+  <p>Search, export, and lookup return one slot per meeting time, so a two-room meeting is
+     still one time slot; its <code>room</code> joins both rooms with <code>/</code>
+     (<code>slots[].room</code> in the exported JSON since 2026-10-09; <code>''</code> =
+     unknown). The cloud roster reseed sends <code>DISTINCT</code> day/start/end rows without
+     a room: the collector never reads rooms. The cloud <code>class_slots</code> has had a
+     <code>room</code> column (all <code>''</code>) since an accidental
+     <code>init_schema</code> there on 2026-10-08.</p>
   <p>Terms crawled before the room column existed were filled by
      <code>scraper/backfill_rooms.py</code> (see maintenance → <a href="maintenance.html#rooms">room backfill</a>);
      the Excel of every stored term back to 2020 still carries the column.</p>

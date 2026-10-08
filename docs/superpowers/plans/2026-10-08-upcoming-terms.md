@@ -170,5 +170,10 @@ that `db.connect()` is the cloud whenever the cloud credentials are sourced.
   `schedule`): both terms `unchanged`, run green.
 - 2026-10-08 18:00 KST local update: `catalog snapshots: 2 term(s), applied
   []`, exit 0.
-- Cloud write usage for October after the `class_slots` rewrite (owner:
-  `turso auth login`, then `turso db show <db> --usage` or the dashboard).
+
+Checked 2026-10-08 after the owner logged in the `turso` CLI: database
+`class-checker` (`libsql://class-checker-jasonr.aws-ap-northeast-1.turso.io`)
+is the one `turso-remote.env` points at; delete protection is on. October
+usage on the starter plan: rows written 0.6M / 10M (6%, including the
+`class_slots` rewrite), rows read 19.2M / 500M, storage 106 MB / 5 GB; resets
+2026-11-01 09:00 KST.

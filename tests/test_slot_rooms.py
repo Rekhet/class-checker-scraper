@@ -90,8 +90,23 @@ class SlotSchemaTests(unittest.TestCase):
                                "end_time": "13:45", "room": room})
         found = db.search(c, year=YEAR, term=TERM, limit=None)
         self.assertEqual(len(found[0]["slots"]), 1)
-        self.assertNotIn("room", found[0]["slots"][0])
-        self.assertEqual(len(db.lookup(c, [(YEAR, TERM, "A", "001")])[0]["slots"]), 1)
+        # one slot per meeting time; its rooms joined like classes.room
+        self.assertEqual(found[0]["slots"][0]["room"], "2-110/3-108")
+        looked = db.lookup(c, [(YEAR, TERM, "A", "001")])[0]["slots"]
+        self.assertEqual([s["room"] for s in looked], ["2-110/3-108"])
+
+    def test_each_meeting_carries_its_own_room_and_unknown_is_empty(self) -> None:
+        conn = _db()
+        _class(conn, 1, "A", slots=[(2, "09:00", "10:15")])       # no room known
+        c = db._Conn(conn, "sqlite")
+        db.add_slot(c, 1, {"day_index": 0, "period": 1, "start_time": "09:00",
+                           "end_time": "10:15", "room": "3-213"})
+        slots = db.search(c, year=YEAR, term=TERM, limit=None)[0]["slots"]
+        self.assertEqual([(s["day_index"], s["room"]) for s in slots],
+                         [(0, "3-213"), (2, "")])
+        self.assertEqual(sorted(slots[0]),
+                         ["class_id", "day_index", "end_time", "period", "room",
+                          "start_time"])
 
     def test_reseed_sends_the_cloud_one_row_per_time(self) -> None:
         local, cloud = _db(), _db()

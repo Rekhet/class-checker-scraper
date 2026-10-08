@@ -1193,6 +1193,32 @@ def search_count(conn: sqlite3.Connection, **filters) -> int:
                         params).fetchone()[0]
 
 
+_SLOT_ROWS = ("SELECT class_id, day_index, period, start_time, end_time, room "
+              "FROM class_slots WHERE class_id IN ({qs}) "
+              "ORDER BY day_index, start_time, end_time, room")
+
+
+def _group_slots(rows, by_id: dict[int, list]) -> None:
+    """Append one slot per meeting time to by_id[class_id]. A meeting held in
+    two rooms at once is two class_slots rows; it becomes ONE slot whose room
+    joins them with '/' like classes.room ('' = unknown). Rows must arrive
+    ordered by class time (the _SLOT_ROWS order)."""
+    last: dict[int, dict] = {}
+    for r in rows:
+        cid = r["class_id"]
+        prev = last.get(cid)
+        if prev and (prev["day_index"], prev["start_time"], prev["end_time"]) == (
+                r["day_index"], r["start_time"], r["end_time"]):
+            if r["room"] and r["room"] not in prev["room"].split("/"):
+                prev["room"] = f"{prev['room']}/{r['room']}" if prev["room"] else r["room"]
+            continue
+        slot = {"class_id": cid, "day_index": r["day_index"], "period": r["period"],
+                "start_time": r["start_time"], "end_time": r["end_time"],
+                "room": r["room"] or ""}
+        by_id[cid].append(slot)
+        last[cid] = slot
+
+
 def _slots_by_id(conn: sqlite3.Connection, ids: list[int],
                  batch: int = 900) -> dict[int, list]:
     """class_id -> [slot dicts], fetched in batches. SQLite caps bound variables
@@ -1202,13 +1228,7 @@ def _slots_by_id(conn: sqlite3.Connection, ids: list[int],
     for i in range(0, len(ids), batch):
         chunk = ids[i:i + batch]
         qs = ",".join("?" * len(chunk))
-        # DISTINCT: a meeting held in two rooms is two rows but one time slot
-        rows = conn.execute(
-            f"SELECT DISTINCT class_id, day_index, period, start_time, end_time "
-            f"FROM class_slots WHERE class_id IN ({qs}) "
-            f"ORDER BY day_index, start_time", chunk).fetchall()
-        for s in rows:
-            by_id[s["class_id"]].append(dict(s))
+        _group_slots(conn.execute(_SLOT_ROWS.format(qs=qs), chunk).fetchall(), by_id)
     return by_id
 
 
@@ -1289,13 +1309,8 @@ def lookup(conn: sqlite3.Connection,
         return []
     ids = [c["id"] for c in classes]
     qs = ",".join("?" * len(ids))
-    slots = conn.execute(
-        f"SELECT DISTINCT class_id, day_index, period, start_time, end_time "
-        f"FROM class_slots WHERE class_id IN ({qs}) ORDER BY day_index, start_time", ids,
-    ).fetchall()
     by_id: dict[int, list] = {i: [] for i in ids}
-    for s in slots:
-        by_id[s["class_id"]].append(dict(s))
+    _group_slots(conn.execute(_SLOT_ROWS.format(qs=qs), ids).fetchall(), by_id)
     for c in classes:
         c["classification"] = json.loads(c["classification"] or "[]")
         c["slots"] = by_id.get(c["id"], [])
