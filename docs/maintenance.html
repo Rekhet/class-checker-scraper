@@ -48,8 +48,9 @@
      nothing is expected to arrive, so it stays silent instead of crying wolf
      off-season.</p>
   <div class="callout warn"><span class="ic">⚠️</span>
-    <p>Only <code>count_samples</code> crosses the cloud boundary. Without a
-       crawl the catalog is frozen: new, renamed, and 폐강대상 classes,
+    <p>Apart from the upcoming-term snapshots, only <code>count_samples</code>
+       crosses the cloud boundary. Without a crawl the current term's catalog is
+       frozen: new, renamed, and 폐강대상 classes,
        professor, room, language, timing, and 평가방식 stay as the last crawl
        left them, and a class missing from the cloud roster is never counted
        there. Run <code>UPDATE_CRAWL=1 ./scripts/update.sh</code> after a
@@ -58,25 +59,30 @@
        <code>turso-remote.env</code> if the roster itself changed.</p></div>
 
   <h2 id="upcoming">Upcoming terms (catalog before the timetable)</h2>
-  <p><code>UPCOMING_TERMS</code> in <code>collect.env</code>
-     (<code>"2026:winter 2027:spring"</code> since 2026-10-08) makes every
-     scheduled run re-read those terms' catalog and 평가방식 —
-     <code>refresh.sh --collect catalog,grading --no-search-timing --min-keep 0.9</code>,
-     15–30 s per term — and then export every term. The term being collected
-     (<code>COUNT_YEAR</code>/<code>COUNT_SEM</code>) is skipped. Details and
-     the rollover step: <code>systemd/README.md</code> → Upcoming terms.</p>
+  <p>Terms in <code>collect.env</code> <code>UPCOMING_TERMS</code>
+     (<code>"2026:winter 2027:spring"</code> since 2026-10-08) are read on a
+     GitHub runner (<code>collect-catalog.yml</code>, 05:20/11:20/17:20 KST)
+     into the cloud table <code>catalog_snapshots</code>, one row per term. The
+     scheduled update only runs
+     <code>python -m scraper.catalog_snapshot pull --dest data/turso.db</code>,
+     which rebuilds the terms whose snapshot changed; this machine does not
+     crawl them. Details: <code>systemd/README.md</code> → Upcoming terms.</p>
   <ul>
-    <li><strong>Run ends with <code>error: published, but an upcoming-term crawl failed</code></strong>
-      — the crawl failed twice (30 s apart); publication still happened and the
-      term's stored catalog is unchanged. Read the journal: a
-      <code>Page.goto: Timeout</code> is sugang/network and clears on its own; a
-      <code>below --min-keep</code> RuntimeError means the Excel returned far
-      fewer classes than stored. If sugang really withdrew that many, rebuild
-      once without the guard:
-      <code>./refresh.sh --year Y --collect catalog,grading --no-search-timing SEM</code>.</li>
-    <li><strong><code>UPCOMING_TERMS entry … is not YEAR:…</code></strong> — fix
-      the entry; each is <code>YYYY:spring|summer|fall|winter</code>,
-      space-separated.</li>
+    <li><strong>Run ends with <code>error: published, but the upcoming-term catalog pull failed or is stale</code></strong>
+      — publication happened. <code>snapshot not refreshed for over 30 h</code>
+      in the journal means the runner stopped: check the
+      <code>collect-catalog</code> runs on GitHub (a failed term is listed in its
+      log; GitHub disables a schedule after 60 days without repository
+      activity — re-enable it with <code>gh workflow enable collect-catalog</code>).
+      Any other error is the pull itself (cloud reachability, credentials).</li>
+    <li><strong>A <code>collect-catalog</code> run failed</strong> — the log names
+      the term. <code>below 90%</code> means the Excel returned far fewer
+      classes than the last snapshot. If sugang really withdrew them, delete
+      that term's <code>catalog_snapshots</code> row in the cloud (the guard
+      compares against it) and dispatch the workflow again.</li>
+    <li><strong>Manual run:</strong>
+      <code>gh workflow run collect-catalog.yml</code>; locally without pushing:
+      <code>set -a; . ./collect.env; set +a; uv run python -m scraper.catalog_snapshot collect --dry-run</code>.</li>
   </ul>
 
   <h2 id="cadence">Refresh cadence</h2>

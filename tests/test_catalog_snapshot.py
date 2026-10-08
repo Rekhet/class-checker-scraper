@@ -84,6 +84,33 @@ class SnapshotTests(unittest.TestCase):
             cs.parse_terms("2027:autumn", count_year="", count_sem="")
 
 
+class LocalConnectionTests(unittest.TestCase):
+    def test_the_local_catalog_is_never_the_cloud_database(self) -> None:
+        # `pull` runs with the cloud credentials in its environment; db.connect()
+        # would follow TURSO_DATABASE_URL to the cloud, and init_schema there
+        # rebuilt the cloud class_slots once (2026-10-08).
+        with self.assertRaisesRegex(SystemExit, "local file"):
+            cs.open_local("libsql://example.turso.io")
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(SystemExit, "not found"):
+                cs.open_local(str(Path(tmp) / "missing.db"))
+
+    def test_pull_cli_opens_the_dest_file_not_the_environment_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "local.db"
+            sqlite3.connect(dest).close()
+            opened = []
+            with patch.object(cs, "open_local",
+                              side_effect=lambda p: opened.append(p) or (_ for _ in ()).throw(
+                                  SystemExit("stop"))), \
+                 patch.object(cs, "_remote", return_value=_remote()), \
+                 patch.dict("os.environ", {"TURSO_DATABASE_URL": "libsql://cloud",
+                                           "DB_BACKEND": "turso"}):
+                with self.assertRaises(SystemExit):
+                    cs.main(["pull", "--dest", str(dest)])
+            self.assertEqual(opened, [str(dest)])
+
+
 class PullTests(unittest.TestCase):
     def _local(self, tmp: str):
         conn = db._connect_sqlite(Path(tmp) / "local.db")
@@ -131,6 +158,19 @@ class PullTests(unittest.TestCase):
 
             self.assertEqual(out["applied"], [("2026", WINTER)])   # still applied
             self.assertEqual(out["stale"], [("2026", WINTER)])
+
+    def test_pull_ignores_cloud_terms_that_are_no_longer_upcoming(self) -> None:
+        # After a rollover the counted term's old snapshot stays in the cloud;
+        # it must neither overwrite the crawled catalog nor raise a stale alert.
+        with tempfile.TemporaryDirectory() as tmp:
+            local, remote = self._local(tmp), _remote()
+            cs.push(remote, _snap([_rec("A1")]), now="2026-10-01T05:20:00")
+
+            out = self._pull(local, remote, now="2026-10-08T06:00:00",
+                             terms=[("2027", "U000200001U000300001")])
+
+            self.assertEqual((out["applied"], out["stale"]), ([], []))
+            self.assertEqual(local.execute("SELECT COUNT(*) FROM classes").fetchone()[0], 0)
 
     def test_pull_leaves_terms_that_are_not_in_the_cloud_alone(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

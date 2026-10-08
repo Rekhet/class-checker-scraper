@@ -405,94 +405,73 @@ class PublishScriptTests(unittest.TestCase):
             self.assertNotIn("reseed_roster", log)
             self.assertIn("--current", log)             # still published, current term only
 
-    def _upcoming_sandbox(self, tmp: str, upcoming: str, *, fail_year: str = "",
-                          fail_once: bool = False):
-        """update.sh with UPCOMING_TERMS set, the real refresh.sh, and a python
-        stub that logs every call (and fails a crawl of `fail_year`, every
-        time or only the first time)."""
+    def _catalog_sandbox(self, tmp: str, *, pull_status: int = 4, remote_env: bool = True):
+        """update.sh with a python stub that logs every call with the database
+        URL it sees, and answers `catalog_snapshot pull` with `pull_status`."""
         project = Path(tmp)
-        run, env, _make_log = self._full_update_sandbox(tmp, remote_env=True)
-        env["UPCOMING_RETRY_DELAY"] = "0"
-        shutil.copy2(ROOT / "refresh.sh", project / "refresh.sh")
-        with (project / "collect.env").open("a", encoding="utf-8") as f:
-            f.write(f'UPCOMING_TERMS="{upcoming}"\n')
+        run, env, _make_log = self._full_update_sandbox(tmp, remote_env=remote_env)
         calls = project / "py.log"
-        failed = project / "failed-once"
-        once = (f"[ -e '{failed}' ] && exit 0; : > '{failed}'; "
-                if fail_once else "")
-        fail = (f'case "$*" in *crawl.py*"--years {fail_year} "*) {once}exit 1;; esac\n'
-                if fail_year else "")
         _executable(project / "bin" / "python",
                     "#!/bin/sh\n"
-                    f"printf '%s\\n' \"$*\" >> '{calls}'\n" + fail + "exit 0\n")
+                    f"printf '%s | %s\\n' \"$*\" \"$TURSO_DATABASE_URL\" >> '{calls}'\n"
+                    f'case "$*" in *catalog_snapshot*pull*) exit {pull_status};; esac\n'
+                    "exit 0\n")
         return run, calls
 
-    def test_upcoming_terms_are_crawled_catalog_only_and_exported(self) -> None:
+    def test_upcoming_terms_are_pulled_from_the_cloud_not_crawled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            run, calls = self._upcoming_sandbox(tmp, "2098:winter 2100:spring")
+            run, calls = self._catalog_sandbox(tmp)
 
             result = run()
 
             self.assertEqual(result.returncode, 0, result.stderr)
             log = calls.read_text(encoding="utf-8")
-            self.assertIn("scraper/crawl.py --years 2098 --terms U000200002U000300002 "
-                          "--collect catalog,grading --no-search-timing --min-keep 0.9",
-                          log)
-            self.assertIn("scraper/crawl.py --years 2100 --terms U000200001U000300001 "
-                          "--collect catalog,grading --no-search-timing --min-keep 0.9",
-                          log)
-            # a new term must reach index.json and the explore index
-            self.assertIn("scraper/export_json.py\n", log)
-            self.assertNotIn("--current", log)
-
-    def test_an_upcoming_term_that_is_the_collected_term_is_skipped(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            run, calls = self._upcoming_sandbox(tmp, "2099:spring")
-
-            result = run()
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            log = calls.read_text(encoding="utf-8")
+            # the cloud credentials are in scope, the LOCAL file is the target
+            self.assertIn("-m scraper.catalog_snapshot pull --dest data/turso.db "
+                          "| libsql://example.turso.io", log)
             self.assertNotIn("crawl.py", log)
-            self.assertIn("--current", log)
+            # a pulled term may be new: export every term
+            self.assertIn("scraper/export_json.py | data/turso.db", log)
+            self.assertNotIn("--current", log)
 
-    def test_a_failed_upcoming_crawl_still_publishes_and_fails_the_run(self) -> None:
+    def test_an_unchanged_catalog_exports_only_the_collected_term(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            run, calls = self._upcoming_sandbox(tmp, "2100:spring", fail_year="2100")
-
-            result = run()
-
-            self.assertEqual(result.returncode, 1)
-            self.assertIn("upcoming-term crawl failed", result.stderr)
-            log = calls.read_text(encoding="utf-8")
-            self.assertEqual(log.count("crawl.py --years 2100"), 2)   # retried once
-            self.assertIn("--current", log)             # published, current term only
-
-    def test_a_transient_upcoming_failure_is_retried_without_failing_the_run(self) -> None:
-        # e.g. the sugang session mint timing out: nothing was wiped, and one
-        # retry usually succeeds, so it must not raise an ops alert.
-        with tempfile.TemporaryDirectory() as tmp:
-            run, calls = self._upcoming_sandbox(tmp, "2100:spring", fail_year="2100",
-                                                fail_once=True)
+            run, calls = self._catalog_sandbox(tmp, pull_status=0)
 
             result = run()
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            log = calls.read_text(encoding="utf-8")
-            self.assertEqual(log.count("crawl.py --years 2100"), 2)
-            self.assertNotIn("--current", log)
+            self.assertIn("--current", calls.read_text(encoding="utf-8"))
 
-    def test_a_malformed_upcoming_entry_fails_the_run_after_publishing(self) -> None:
+    def test_a_stale_catalog_snapshot_still_publishes_and_fails_the_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            run, calls = self._upcoming_sandbox(tmp, "2100:autumn 2098:winter")
+            run, calls = self._catalog_sandbox(tmp, pull_status=3)
 
             result = run()
 
             self.assertEqual(result.returncode, 1)
-            self.assertIn("2100:autumn", result.stderr)
-            log = calls.read_text(encoding="utf-8")
-            self.assertIn("--years 2098", log)          # the valid entry still runs
-            self.assertIn("scraper/export_json.py\n", log)
+            self.assertIn("upcoming-term catalog", result.stderr)
+            self.assertIn("scraper/export_json.py | data/turso.db",
+                          calls.read_text(encoding="utf-8"))
+
+    def test_a_failed_catalog_pull_publishes_the_current_term_and_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run, calls = self._catalog_sandbox(tmp, pull_status=1)
+
+            result = run()
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("upcoming-term catalog", result.stderr)
+            self.assertIn("--current", calls.read_text(encoding="utf-8"))
+
+    def test_no_cloud_credentials_skip_the_catalog_pull(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run, calls = self._catalog_sandbox(tmp, remote_env=False)
+
+            result = run()
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("catalog_snapshot", calls.read_text(encoding="utf-8"))
 
     def test_cart_wrapper_dry_run_selects_only_cart(self) -> None:
         env = os.environ.copy()

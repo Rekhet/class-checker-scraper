@@ -10,7 +10,9 @@ volatile columns (`python -m scraper.sync_counts`), and publishes. A missing
 workers may have collected this hour, and pending trend commits in `web/` are
 pushed by this run alone — and the run then exits nonzero only if the newest
 sample is also stale for an open collection window. Set `UPDATE_CRAWL=1` for an
-intentional catalog/평가방식 refresh, which only a local crawl can collect.
+intentional catalog/평가방식 refresh of the current term, which only a local
+crawl collects. Upcoming terms are collected on a runner too (see Upcoming
+terms).
 
 ### Temporary: collecting locally during a cloud outage
 
@@ -162,8 +164,8 @@ For an intentional one-off full refresh, `UPDATE_CRAWL=1` enables the crawl and
 configured scope. `UPDATE_COLLECTIONS` is fail-closed if it includes `cart`;
 cart collection belongs to the bounded worker.
 
-Only `count_samples` crosses the cloud boundary, so without a crawl the catalog
-itself is frozen: new/renamed/폐강 classes, professor, room, language, timing,
+Apart from the upcoming-term snapshots (below), only `count_samples` crosses
+the cloud boundary, so without a crawl the current term's catalog is frozen: new/renamed/폐강 classes, professor, room, language, timing,
 and 평가방식 stay as the last crawl left them, and a class missing from the
 cloud roster is never counted there. Run `UPDATE_CRAWL=1 ./scripts/update.sh`
 after a timetable change. If the roster itself changed, re-seed the collector's
@@ -213,30 +215,36 @@ sugang lists a coming term's catalog and 평가방식 weeks before its timetable
 rooms, or counts (sampled 2026-10-08: 2026 겨울 212 classes, 2027 1학기 3,952;
 수업교시, 수업형태, and 강의실 empty in both the Excel and the search, every
 count 0). `UPCOMING_TERMS` in `collect.env` (`"2026:winter 2027:spring"` since
-2026-10-08) lists those terms, and every `update.sh` run re-reads each one:
+2026-10-08) lists those terms; the term equal to `COUNT_YEAR`/`COUNT_SEM` is
+skipped on both sides. They are collected remotely and only deployed here:
 
-    refresh.sh --year Y --collect catalog,grading --no-search-timing --min-keep 0.9 SEM
-
-- Catalog + grading only: no counts, and no search-timing sweep (the search
-  carries no times either, so it would page through the whole term for
-  nothing). About ten requests and 15–30 s per term.
-- `--min-keep 0.9` downloads the Excel first and refuses, touching nothing, an
-  Excel with fewer than 90% of the classes stored for the term; an empty or
-  truncated reply would otherwise wipe it and publish it empty.
-- A term equal to `COUNT_YEAR`/`COUNT_SEM` is skipped (it has its own
-  collection). A failed term is retried once after 30 s (the usual cause is a
-  session-mint timeout, before anything is wiped); if the retry fails too the
-  run still publishes and then exits 1, so `notify-failure.sh` opens or
-  comments on the ops-alert issue. A malformed entry fails the run the same way.
-- Any successful upcoming crawl exports every term (`EXPORT_SCOPE=all`), so a
-  new term reaches `index.json` and the explore index. The full export takes
-  about 10–20 s.
-- When the timetable appears, the next run picks the times up from the Excel;
-  nothing needs switching. The web already shows time-less classes as
+- **Runner:** `.github/workflows/collect-catalog.yml` (05:20, 11:20, 17:20
+  KST via GitHub `schedule`, plus `workflow_dispatch`) runs
+  `python -m scraper.catalog_snapshot collect`: per term one Excel and the four
+  평가방식 sweeps, stored as one zlib-JSON row of the cloud table
+  `catalog_snapshots` (2027 1학기 ≈ 92 KB). An unchanged term only updates
+  `checked_at`. A term with no classes, no 평가방식 tags, or fewer than 90%
+  of its previous snapshot's classes is refused; a failed term (after one
+  retry) fails the run, and GitHub e-mails the owner.
+- **Local:** `update.sh` runs `python -m scraper.catalog_snapshot pull --dest
+  <local catalog>` with the cloud credentials, after the counts pull. It
+  rebuilds only terms whose digest changed, exactly as a crawl would (classes,
+  slots with rooms, 평가방식, change log, `crawl_runs`). Exit 4 (rebuilt) makes
+  the run export every term; exit 3 means a snapshot was not refreshed for
+  30 h (runner stopped, or GitHub disabled the schedule after 60 days without
+  repository activity) — the run still publishes and then fails (ops alert).
+- The upcoming classes never enter the cloud `classes` table (its ids are the
+  local ones, copied by `reseed_roster`).
+- When the timetable appears, the next runner pass carries the times and
+  rooms; nothing needs switching. The web already shows time-less classes as
   시간미정 / TBA.
 
-When a listed term becomes the collected term (rollover below), remove it from
-`UPCOMING_TERMS`.
+`UPCOMING_TERMS` is read by the runner, so a change takes effect once pushed
+to `main`. When a listed term becomes the collected term (rollover below),
+remove it; its leftover cloud snapshot is then ignored.
+
+`scraper/crawl.py --min-keep RATIO` (also `refresh.sh --min-keep`) applies the
+same shrink guard to a local catalog rebuild.
 
 ## Semester rollover
 

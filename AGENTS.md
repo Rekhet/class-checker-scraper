@@ -32,7 +32,11 @@ local `scripts/update.sh` (06:00, 12:00, 18:00 daily) merges those samples back 
 `scraper/pull_counts.py`, copies the newest sample onto the catalog's volatile
 columns via `python -m scraper.sync_counts`, and exports. It does **not** crawl
 sugang: the scheduled run is merge + publish only, and `UPDATE_CRAWL=1` is the
-opt-in for a catalog/평가방식 refresh that only a local crawl can collect.
+opt-in for a refresh of the CURRENT term's catalog/평가방식, which only a local
+crawl collects. Upcoming terms (`collect.env` `UPCOMING_TERMS`) are read by
+`.github/workflows/collect-catalog.yml` into the cloud table
+`catalog_snapshots`; `update.sh` pulls them with
+`python -m scraper.catalog_snapshot pull` (since 2026-10-08).
 
 Consequences every change must respect:
 
@@ -51,11 +55,18 @@ Consequences every change must respect:
   that heals a writer/reader baseline split, so do not remove it.
 - **Verify a collector change against an actual runner pass** (the next
   cron run's samples in the cloud DB), not only against a local run.
-- **Only `count_samples` crosses the cloud boundary.** Catalog facts (new,
-  renamed, 폐강대상 classes, professor, room, language, timing, 평가방식) move
-  only when someone runs `UPDATE_CRAWL=1 ./scripts/update.sh` or `make
-  refresh`; a class missing from the cloud roster is never counted there until
-  that roster is re-seeded from the local catalog.
+- **Only `count_samples` and `catalog_snapshots` cross the cloud boundary.**
+  The current term's catalog facts (new, renamed, 폐강대상 classes, professor,
+  room, language, timing, 평가방식) move only when someone runs
+  `UPDATE_CRAWL=1 ./scripts/update.sh` or `make refresh`; a class missing from
+  the cloud roster is never counted there until that roster is re-seeded from
+  the local catalog. Upcoming terms never enter the cloud `classes` table:
+  `reseed_roster` copies local class ids there.
+- **With `turso-remote.env` sourced, `db.connect()` is the CLOUD database.**
+  Local tools run in that environment must open the local file by path
+  (`pull_counts --dest`, `catalog_snapshot pull --dest`). On 2026-10-08 a pull
+  that used `db.connect()` ran `init_schema` against the cloud and rebuilt its
+  `class_slots` (~116k row writes).
 - A collection failure on the runner fails the Actions run loudly by design
   (retries exhausted or an incomplete roster) and emails the owner; do not
   soften that path.

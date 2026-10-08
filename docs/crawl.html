@@ -193,10 +193,11 @@ ENROLL_SLOW_SLOT_MINUTES=60</code></pre>
      평가방식 filtered sweeps partition the roster exactly (A~F + S/U = total);
      the cc103 detail has 상대/절대평가 and professor e-mail but no 강의계획.
      수업교시, 수업형태, and 강의실 are empty in the Excel <em>and</em> the search
-     results, and every count is 0. Such a term is crawled with
-     <code>--collect catalog,grading --no-search-timing</code> (the
-     search-timing sweep would page through the whole term and find no times)
-     and its classes export as 시간미정. See <code>UPCOMING_TERMS</code> in
+     results, and every count is 0. Such terms are read on a GitHub runner by
+     <code>scraper/catalog_snapshot.py</code> — the Excel and the 평가방식
+     sweeps only, never the search-timing sweep (it would page through the
+     whole term and find no times) — and their classes export as 시간미정. See
+     <code>UPCOMING_TERMS</code> in
      <a href="maintenance.html#upcoming">maintenance</a>.</p>
 
   <h2 id="per-term">What a term refresh does</h2>
@@ -227,7 +228,7 @@ ENROLL_SLOW_SLOT_MINUTES=60</code></pre>
     <tr><td><code>--windowed</code></td><td>Skip before any network work when the selected live metric windows are inactive.</td></tr>
     <tr><td><code>--no-counts</code></td><td>Excel (+ timing recovery) only; skip the count overlay.</td></tr>
     <tr><td><code>--no-search-timing</code></td><td>Skip the cell sweep even when the Excel timing is missing.</td></tr>
-    <tr><td><code>--min-keep RATIO</code></td><td>Catalog rebuild guard: download every Excel first and refuse, wiping nothing, one with fewer than <code>RATIO</code> × the classes stored for its term (the scheduled upcoming-term crawl uses <code>0.9</code>).</td></tr>
+    <tr><td><code>--min-keep RATIO</code></td><td>Catalog rebuild guard: download every Excel first and refuse, wiping nothing, one with fewer than <code>RATIO</code> × the classes stored for its term (the upcoming-term runner applies the same 90% bar to its snapshots).</td></tr>
     <tr><td><code>--workers</code></td><td>Concurrent cell fetchers for the timing sweep (default <code>6</code>).</td></tr>
   </table></div>
 

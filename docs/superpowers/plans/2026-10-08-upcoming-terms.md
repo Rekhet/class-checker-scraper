@@ -2,9 +2,10 @@
 
 ## Status
 
-Implemented, run live, committed and pushed on 2026-10-08. The first
-scheduled run with this code is 2026-10-08 18:00 KST — pending, see
-"Pending live verification".
+Remote since 2026-10-08 (same day as the first, local version): upcoming
+terms are read on a GitHub runner and only pulled and published here — see
+"Move to remote collection". The local crawl described next was the first
+version and is gone from `update.sh`.
 
 ## Why
 
@@ -98,10 +99,6 @@ Cost of one catalog + grading read: 5 Excel requests per term. 2027 1학기
   so no ops-alert issue was opened for it. Not investigated further; the alert
   path last worked on 2026-09-27 (issue #1).
 
-## Pending live verification
-
-- 2026-10-08 18:00 KST scheduled run: both upcoming terms crawled, exit 0,
-  web pushed (including `2e42e96`).
 
 ## Move to remote collection (owner, 2026-10-08, same day)
 
@@ -137,3 +134,41 @@ Steps done:
   writes it; local `data/turso.db` via `init_schema`.
 - Local dry run of `collect` against sugang: 2026 겨울학기 212 classes / 212
   graded, 2027 1학기 3,952 / 3,952, 7 s.
+- Runner pass (dispatch, run 37738478543, commit `34f4a41`, 06:35Z):
+  2026 겨울학기 212 classes / 212 graded, 6 KB, new; 2027 1학기 3,952 /
+  3,952, 92 KB, new; run green.
+- Pull into the local catalog (after the fix below): both terms rebuilt with
+  change log `new=0 removed=0 changed=0`, i.e. identical to the local crawl;
+  digests equal the local dry run (`8856d93f5489`, `4c3ce7305e9d`); grading
+  NULL 0, 전환가능 40 / 991; crawl_runs 457, 458.
+- Cutover: `update.sh` no longer crawls upcoming terms; it runs
+  `catalog_snapshot pull --dest "$LOCAL_DB"` inside the cloud-credential
+  subshell (exit 0 unchanged → current-term export, 4 rebuilt → full export,
+  3 stale or other → publish, then exit 1). Live run 15:3x KST: 17 s, `applied
+  []`, current-term export, web `49c12b2` pushed (with the held `2e42e96`).
+- `pull` only considers `UPCOMING_TERMS` minus the counted term, so after a
+  rollover the counted term's leftover snapshot neither overwrites the crawled
+  catalog nor raises a stale alert.
+
+### Incident: init_schema on the cloud (2026-10-08 ~15:40 KST)
+
+The first `pull` ran with `turso-remote.env` sourced and opened the "local"
+catalog with `db.connect()`, which follows `TURSO_DATABASE_URL` — the cloud.
+`init_schema` then ran there: the per-meeting-room migration rebuilt the cloud
+`class_slots` (now has `room`, 115,636 rows kept, `room=''`), and the pull
+compared the cloud with itself (`applied []`). Nothing else was written. The
+collector never reads `class_slots` and `reseed_roster` inserts room-less rows
+(default `''`), so behaviour is unchanged; the cost is one rewrite of that
+table (~116k rows) against the plan's write quota. Usage could not be checked
+(`turso` CLI not logged in). Fix: `pull` opens `--dest` by path
+(`open_local`, refuses a URL), with a regression test; AGENTS.md now states
+that `db.connect()` is the cloud whenever the cloud credentials are sourced.
+
+## Pending live verification
+
+- Next scheduled `collect-catalog` run (2026-10-08 17:20 KST, GitHub
+  `schedule`): both terms `unchanged`, run green.
+- 2026-10-08 18:00 KST local update: `catalog snapshots: 2 term(s), applied
+  []`, exit 0.
+- Cloud write usage for October after the `class_slots` rewrite (owner:
+  `turso auth login`, then `turso db show <db> --usage` or the dashboard).

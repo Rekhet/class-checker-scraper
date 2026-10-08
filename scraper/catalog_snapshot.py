@@ -14,7 +14,8 @@ remotely and only deployed from this machine:
 * ``pull`` (local, scripts/update.sh): rebuilds each term whose digest differs
   from the one last applied, exactly as a local crawl would (classes, slots
   with rooms, 평가방식, change log). A snapshot older than --max-age-hours is
-  reported (exit 3) so a stopped schedule raises the ops alert.
+  reported (exit 3) so a stopped schedule raises the ops alert. Exit 4 means
+  a term was rebuilt (update.sh then exports every term), 0 nothing changed.
 
 The upcoming classes never enter the cloud ``classes`` table: reseed_roster
 copies local class ids there, and rows inserted by the runner would collide.
@@ -163,7 +164,7 @@ def apply_snapshot(local, row) -> dict:
     try:   # the change log is a side effect; never fail a good rebuild over it
         rows, changes = changelog.diff(old, changelog.snapshot(local, year_terms))
         changelog.write_run_log(run_id, rows, changes)
-        print(f"{year} {label}: {classes} classes · "
+        print(f"{label}: {classes} classes · "
               f"{changelog.summary_line(changes, None)}", flush=True)
     except Exception as e:  # noqa: BLE001
         print(f"warn: change log for {year}/{term} failed: {e}", file=sys.stderr)
@@ -171,14 +172,21 @@ def apply_snapshot(local, row) -> dict:
 
 
 def pull(remote, local, *, now: str | None = None,
-         max_age_hours: float = MAX_AGE_HOURS) -> dict:
-    """Apply every cloud snapshot whose digest differs from the local one."""
+         max_age_hours: float = MAX_AGE_HOURS,
+         terms: list[tuple[str, str]] | None = None) -> dict:
+    """Apply every cloud snapshot whose digest differs from the local one.
+
+    `terms` limits it to the configured upcoming terms: once a term becomes
+    the counted one, its leftover snapshot must not overwrite the crawled
+    catalog or raise a stale alert."""
     now_dt = datetime.fromisoformat(now or _now())
     have = {(r[0], r[1]): r[2] for r in local.execute(
         "SELECT year, term, digest FROM catalog_snapshots").fetchall()}
     cloud = remote.execute(
         "SELECT year, term, digest, checked_at FROM catalog_snapshots ORDER BY year, term"
     ).fetchall()
+    if terms is not None:
+        cloud = [r for r in cloud if (r[0], r[1]) in set(terms)]
     applied, stale = [], []
     for year, term, digest, checked_at in cloud:
         if now_dt - datetime.fromisoformat(checked_at) > timedelta(hours=max_age_hours):
@@ -191,6 +199,20 @@ def pull(remote, local, *, now: str | None = None,
         apply_snapshot(local, tuple(row))
         applied.append((year, term))
     return {"terms": len(cloud), "applied": applied, "stale": stale}
+
+
+def open_local(dest: str):
+    """The local catalog FILE. Never db.connect(): pull runs with the cloud
+    credentials in its environment, and db.connect() follows
+    TURSO_DATABASE_URL — on 2026-10-08 that pointed init_schema at the cloud
+    and rebuilt its class_slots."""
+    import libsql
+
+    if "://" in dest:
+        raise SystemExit(f"error: --dest must be a local file, not {dest}")
+    if not os.path.isfile(dest):
+        raise SystemExit(f"error: local catalog not found: {dest}")
+    return db._Conn(libsql.connect(dest), "libsql")
 
 
 def _remote():
@@ -261,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--dry-run", action="store_true", help="crawl, push nothing")
     p = sub.add_parser("pull", help="local: apply changed snapshots to the catalog")
     p.add_argument("--max-age-hours", type=float, default=MAX_AGE_HOURS)
+    p.add_argument("--dest", default="data/turso.db", help="local catalog file")
     sub.add_parser("init-remote", help="create catalog_snapshots in the cloud")
     args = ap.parse_args(argv)
 
@@ -269,24 +292,25 @@ def main(argv: list[str] | None = None) -> int:
         init_remote(remote)
         print("catalog_snapshots ready")
         return 0
+    spec = getattr(args, "terms", None)
+    try:
+        terms = parse_terms(spec if spec is not None else os.environ.get("UPCOMING_TERMS", ""),
+                            count_year=os.environ.get("COUNT_YEAR", ""),
+                            count_sem=os.environ.get("COUNT_SEM", ""))
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     if args.cmd == "collect":
-        spec = args.terms if args.terms is not None else os.environ.get("UPCOMING_TERMS", "")
-        try:
-            terms = parse_terms(spec, count_year=os.environ.get("COUNT_YEAR", ""),
-                                count_sem=os.environ.get("COUNT_SEM", ""))
-        except ValueError as e:
-            print(f"error: {e}", file=sys.stderr)
-            return 2
         if not terms:
             print("no upcoming terms configured; nothing to collect")
             return 0
         return collect(terms, dry_run=args.dry_run)
 
+    local = open_local(args.dest)
     remote = _remote()
-    local = db.connect()
     try:
         db.init_schema(local)
-        out = pull(remote, local, max_age_hours=args.max_age_hours)
+        out = pull(remote, local, max_age_hours=args.max_age_hours, terms=terms)
     finally:
         local.close()
         remote.close()
@@ -297,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
               f"{[f'{y}/{t}' for y, t in out['stale']]} (collect-catalog stopped?)",
               file=sys.stderr)
         return 3
-    return 0
+    return 4 if out["applied"] else 0
 
 
 if __name__ == "__main__":
