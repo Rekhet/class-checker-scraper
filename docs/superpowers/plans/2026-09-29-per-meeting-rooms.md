@@ -92,9 +92,8 @@ Owner's order: the data format first, the screen design afterwards, together.
 
 ## Deferred
 
-- Time-picker empty-room search and a room pool that lists rooms seen in past
-  terms (labelled with the last term seen, as an estimate). The slot room is
-  now exported; the screen is to be designed with the owner, then built in
-  `web/`.
+- ~~Time-picker empty-room search and a room pool of past-term rooms~~ —
+  done 2026-10-09: the 강의실 page
+  (`docs/superpowers/specs/2026-10-09-rooms-page-design.md`).
 - `server.py` admin stats count `class_slots` rows, so a two-room meeting
   counts twice there.

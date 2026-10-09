@@ -3,8 +3,23 @@
 ## Status
 
 Design approved section by section by the owner on 2026-10-09 (3 sections +
-an interactive HTML mock on real 2026 2학기 data). Not implemented. Next: the
-implementation plan (superpowers:writing-plans).
+an interactive HTML mock on real 2026 2학기 data). Implemented and published
+2026-10-09: scraper `01ce0d3`, `7065451` (normalizer, `rooms-index.json`);
+web `607f0e2`..`2f68c7d` pushed to the site. Plan:
+`docs/superpowers/plans/2026-10-09-rooms-page.md`.
+
+Changed after approval, by the owner at the preview: the 강의실 tab sits
+before 졸업요건; at phone width the top nav stays one row and only the tab
+strip scrolls sideways (the active tab is kept visible, re-checked after web
+fonts load); and the 졸업요건 major rows switch to three lines (type / 학과 /
+학번) when they do not fit — that page overflowed to 367 px at 320 px wide,
+also on the live site before this work.
+
+Live check 2026-10-09 ~23:59 KST after the Pages deploy of `2f68c7d`:
+`data/classes/rooms-index.json` 200 (1,144 rooms); tabs 시간표 · 강의탐색 · 인원 추이 ·
+강의실 · 졸업요건; finder and `#room/86-206` (2 blocks, 동시 사용 label) render; at
+320 px the 졸업요건 page is 320 px wide with the main row stacked and the nav one row;
+no page errors.
 
 ## Why
 

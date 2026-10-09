@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-09-rooms-page-design.md`
 
+**Status (2026-10-09):** executed — every task done and published; deviations and rulings in the spec's Status and the execution notes below.
+
 ## Global Constraints
 
 - `web/` is a separate public repository and **a push to it is a deploy**. Web commits stay local until the owner approves the local preview (Task 7).
@@ -43,7 +45,7 @@
 **Interfaces:**
 - Produces: `rooms.Room(campus: str, building: str, name: str)` (NamedTuple, `.key -> "campus|name"`); `rooms.normalize_room(raw: str) -> Room | None`; `rooms.building_rank(building: str) -> tuple`.
 
-- [ ] **Step 1: Write the fixture** `tests/fixtures/room_names.json`
+- [x] **Step 1: Write the fixture** `tests/fixtures/room_names.json`
 
 ```json
 [
@@ -67,7 +69,7 @@
 ]
 ```
 
-- [ ] **Step 2: Write the failing tests** `tests/test_rooms.py`
+- [x] **Step 2: Write the failing tests** `tests/test_rooms.py`
 
 ```python
 """Room-name normalization and the rooms index (spec 2026-10-09-rooms-page-design)."""
@@ -101,12 +103,12 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(got, ["2", "9-2", "10", "10-1", "100", "M"])
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `uv run pytest -q tests/test_rooms.py`
 Expected: FAIL — `ImportError: cannot import name 'rooms'`.
 
-- [ ] **Step 4: Implement** `scraper/rooms.py`
+- [x] **Step 4: Implement** `scraper/rooms.py`
 
 ```python
 """Room names in the catalog: campus, building, normalized name.
@@ -165,9 +167,9 @@ def building_rank(building: str) -> tuple:
     return (1, building)
 ```
 
-- [ ] **Step 5: Run tests** — `uv run pytest -q tests/test_rooms.py` → PASS.
+- [x] **Step 5: Run tests** — `uv run pytest -q tests/test_rooms.py` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add scraper/rooms.py tests/fixtures/room_names.json tests/test_rooms.py
@@ -185,7 +187,7 @@ git commit -m "feat: normalize room names (campus, padding, building)"
 - Consumes: `normalize_room`, `building_rank` (Task 1).
 - Produces: `rooms.build_rooms_index(conn) -> {"version": 1, "rooms": [[campus, building, name, last_year, last_term, terms_seen], ...]}` sorted by (campus order 관악/연건/평창, `building_rank`, name); file `web/data/classes/rooms-index.json` with a `generated` stamp.
 
-- [ ] **Step 1: Failing test** (append to `tests/test_rooms.py`)
+- [x] **Step 1: Failing test** (append to `tests/test_rooms.py`)
 
 ```python
 def _catalog():
@@ -221,9 +223,9 @@ class IndexTests(unittest.TestCase):
         ])
 ```
 
-- [ ] **Step 2: Run** — FAIL (`build_rooms_index` missing).
+- [x] **Step 2: Run** — FAIL (`build_rooms_index` missing).
 
-- [ ] **Step 3: Implement** (append to `scraper/rooms.py`)
+- [x] **Step 3: Implement** (append to `scraper/rooms.py`)
 
 ```python
 CAMPUS_ORDER = {DEFAULT_CAMPUS: 0, "연건": 1, "평창": 2}
@@ -250,15 +252,15 @@ def build_rooms_index(conn) -> dict:
     return {"version": 1, "rooms": out}
 ```
 
-- [ ] **Step 4: Wire the export.** In `scraper/export_json.py` add `import rooms` next to `import db`, and right after the `_export_explore(...)` call in `main()` (full export only):
+- [x] **Step 4: Wire the export.** In `scraper/export_json.py` add `import rooms` next to `import db`, and right after the `_export_explore(...)` call in `main()` (full export only):
 
 ```python
         _write_stamped(classes_dir / "rooms-index.json", rooms.build_rooms_index(conn))
 ```
 
-- [ ] **Step 5: Run** `uv run pytest -q tests` → all pass.
+- [x] **Step 5: Run** `uv run pytest -q tests` → all pass.
 
-- [ ] **Step 6: Real export + check**
+- [x] **Step 6: Real export + check**
 
 ```bash
 DB_BACKEND=turso TURSO_DATABASE_URL=data/turso.db .venv/bin/python -m scraper.process_lock --timeout 120 -- .venv/bin/python scraper/export_json.py
@@ -266,9 +268,9 @@ python3 -c "import json;d=json.load(open('web/data/classes/rooms-index.json'));f
 ```
 Expected: 1,144 rooms — 관악 1,094, 연건 39, 평창 11 (the mock's count, 2026-10-09). File size tens of KB.
 
-- [ ] **Step 7: Docs.** `docs/database.html`: list `classes/rooms-index.json` with its row shape. `docs/crawl.html` (#rooms): campus prefixes, 2020 zero padding, building inference, the index.
+- [x] **Step 7: Docs.** `docs/database.html`: list `classes/rooms-index.json` with its row shape. `docs/crawl.html` (#rooms): campus prefixes, 2020 zero padding, building inference, the index.
 
-- [ ] **Step 8: Commit + push scraper; publish data**
+- [x] **Step 8: Commit + push scraper; publish data**
 
 ```bash
 git add scraper/rooms.py scraper/export_json.py tests/test_rooms.py docs/database.html docs/crawl.html
@@ -286,9 +288,9 @@ PUBLISH_COMMIT_MESSAGE="chore(data): add rooms-index.json" ./scripts/publish.sh 
 **Interfaces:**
 - Produces: `paintWeekGrid(meetings, { dayN, startMin, endMin, conflicts = true, decorate = null, column = null }) -> { head: HTMLElement, ttx: HTMLElement }`. `meetings`: `[{ c, day, a, b }]` (minutes). `decorate(node, m, h)` adds content to a block after the default name/time/professor; `column(d, col, y)` appends extras to a day column, `y(min)` = px offset.
 
-- [ ] **Step 1: Baseline** — `uv run pytest -q web/tests --deselect web/tests/test_grad_golden.py::GraduationAuditGoldenTests::test_audit_matches_the_golden_snapshot --deselect web/tests/test_change_feed.py::ChangeFeedTests::test_more_pages_and_older_periods_render` → 32 passed (2026-10-09).
+- [x] **Step 1: Baseline** — `uv run pytest -q web/tests --deselect web/tests/test_grad_golden.py::GraduationAuditGoldenTests::test_audit_matches_the_golden_snapshot --deselect web/tests/test_change_feed.py::ChangeFeedTests::test_more_pages_and_older_periods_render` → 32 passed (2026-10-09).
 
-- [ ] **Step 2: Extract.** Move the head/gutter/column/block code of `renderTTNow` into:
+- [x] **Step 2: Extract.** Move the head/gutter/column/block code of `renderTTNow` into:
 
 ```js
 // The proportional week grid (time gutter, hour/half-hour lines, packed class
@@ -388,9 +390,9 @@ In `renderTTNow`, replace the moved code with (keeping the preview blocks via `c
 ```
 and keep the existing `bodyWrap` / empty overlay / TBA code, appending `ttx` as before. Delete the now-unused locals (`H`, `cols`) in `renderTTNow` only if nothing else there uses them.
 
-- [ ] **Step 3: Run the Step 1 command** → same 32 passed.
+- [x] **Step 3: Run the Step 1 command** → same 32 passed.
 
-- [ ] **Step 4: Local web commit (no push)**
+- [x] **Step 4: Local web commit (no push)**
 
 ```bash
 git -C web add app.js
@@ -407,7 +409,7 @@ git -C web commit -m "refactor: extract the week-grid painter from renderTTNow"
 - Consumes: `tests/fixtures/room_names.json` (Task 1), `rooms-index.json` (Task 2), `termRows(year, term)`, `toMin`.
 - Produces: `normRoom(raw) -> {campus, building, name, key} | null`; `roomLabel(r)`; `roomParam(r)` / `parseRoomParam(param) -> key`; `buildingRank(b) -> array` (same order as Python); `roomsIndex() -> Promise<[{campus, building, name, key, year, term, terms}]>`; `roomMeetings(rows) -> Map<key, {room, meets:[{c, day, a, b, others:[label]}]}>`; `freeRooms(meetings, pool, q) -> [{room, current, next, last}]` where `q = {campus, building, day, a, b, past}`, `next = {a, c} | null`, `last = {year, term} | null`.
 
-- [ ] **Step 1: Failing tests** `web/tests/test_rooms.py` — harness copied from `test_change_feed.py` (`_Quiet`, `setUpClass` serving `WEB_ROOT`, base `index.html#rooms`, `_run(fn)` collecting `pageerror`). First two tests:
+- [x] **Step 1: Failing tests** `web/tests/test_rooms.py` — harness copied from `test_change_feed.py` (`_Quiet`, `setUpClass` serving `WEB_ROOT`, base `index.html#rooms`, `_run(fn)` collecting `pageerror`). First two tests:
 
 ```python
 SCRAPER = WEB_ROOT.parent
@@ -432,9 +434,9 @@ FIXTURE = SCRAPER / "tests" / "fixtures" / "room_names.json"
         self._run(steps)
 ```
 
-- [ ] **Step 2: Run** — FAIL (`normRoom is not defined`).
+- [x] **Step 2: Run** — FAIL (`normRoom is not defined`).
 
-- [ ] **Step 3: Implement** in `web/app.js`:
+- [x] **Step 3: Implement** in `web/app.js`:
 
 ```js
 // ---------- 강의실 (rooms) ----------
@@ -531,7 +533,7 @@ function freeRooms(meetings, pool, q) {
 }
 ```
 
-- [ ] **Step 4: Add the occupancy test** (independent computation in Python using `scraper/rooms.py`):
+- [x] **Step 4: Add the occupancy test** (independent computation in Python using `scraper/rooms.py`):
 
 ```python
 YEAR, TERM = "2026", "U000200002U000300001"
@@ -581,9 +583,9 @@ def expected_free(day, a, b, campus, building="", past=True):
 ```
 (Sorting both sides makes the comparison order-free; ordering is covered by `buildingRank` in Task 1's Python twin and the screen test of Task 5.)
 
-- [ ] **Step 5: Run** `uv run pytest -q web/tests/test_rooms.py` → PASS.
+- [x] **Step 5: Run** `uv run pytest -q web/tests/test_rooms.py` → PASS.
 
-- [ ] **Step 6: Local web commit** — `git -C web add app.js tests/test_rooms.py && git -C web commit -m "feat: room normalizer, rooms index and occupancy"`
+- [x] **Step 6: Local web commit** — `git -C web add app.js tests/test_rooms.py && git -C web commit -m "feat: room normalizer, rooms index and occupancy"`
 
 ### Task 5: The 강의실 tab — finder screen (web)
 
@@ -596,7 +598,7 @@ def expected_free(day, a, b, campus, building="", past=True):
 - Consumes: Task 4 functions, `dataIndex()`, `meta.cur` (`"year|term"`), `DAYS`, `hhmm`.
 - Produces: `renderRooms(route, param)` (router entry), `roomsState = {term, campus, building, day, a, b, past}`, DOM ids `roomTerm roomCampus roomBuilding roomDay roomFrom roomTo roomNow roomPast roomsSummary roomsResults roomsFinder roomWeek`.
 
-- [ ] **Step 1: Partial** `web/partials/rooms.html`
+- [x] **Step 1: Partial** `web/partials/rooms.html`
 
 ```html
 <!-- 강의실 page: empty-room finder (#rooms) and one room's weekly schedule
@@ -629,7 +631,7 @@ def expected_free(day, a, b, campus, building="", past=True):
 </div>
 ```
 
-- [ ] **Step 2: Failing screen tests** (append to `web/tests/test_rooms.py`; base URL `index.html#rooms`):
+- [x] **Step 2: Failing screen tests** (append to `web/tests/test_rooms.py`; base URL `index.html#rooms`):
 
 ```python
     def test_finder_lists_the_same_rooms_grouped_by_building(self) -> None:
@@ -668,9 +670,9 @@ def expected_free(day, a, b, campus, building="", past=True):
         self._run(steps)
 ```
 
-- [ ] **Step 3: Run** — FAIL.
+- [x] **Step 3: Run** — FAIL.
 
-- [ ] **Step 4: Implement** in `web/app.js` (rooms section):
+- [x] **Step 4: Implement** in `web/app.js` (rooms section):
 
 ```js
 const roomsState = { term: "", campus: "관악", building: "", day: 0, a: 9 * 60, b: 10 * 60, past: true };
@@ -818,7 +820,7 @@ details.room-bld .cnt { font-weight: 500; color: var(--cp-muted); font-size: 12p
 @media (max-width: 640px) { .room-list { grid-template-columns: 1fr; padding-left: 14px; } }
 ```
 
-- [ ] **Step 5–6:** run `uv run pytest -q web/tests/test_rooms.py` → PASS (with Task 6 if committed together); local web commit `feat: 강의실 tab — empty-room finder`.
+- [x] **Step 5–6:** run `uv run pytest -q web/tests/test_rooms.py` → PASS (with Task 6 if committed together); local web commit `feat: 강의실 tab — empty-room finder`.
 
 ### Task 6: Weekly schedule + links from existing screens (web)
 
@@ -830,7 +832,7 @@ details.room-bld .cnt { font-weight: 500; color: var(--cp-muted); font-size: 12p
 - Consumes: `paintWeekGrid` (Task 3), Task 4/5 functions.
 - Produces: `renderRoomWeek(param)`; `roomLinks(raw) -> DocumentFragment` (one `<a class="room-link">` per '/'-separated room).
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```python
     def test_week_shows_the_rooms_meetings_and_shared_rooms(self) -> None:
@@ -860,9 +862,9 @@ details.room-bld .cnt { font-weight: 500; color: var(--cp-muted); font-size: 12p
         self._run(steps)
 ```
 
-- [ ] **Step 2: Run** — FAIL.
+- [x] **Step 2: Run** — FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```js
 // One link per room of a '/'-joined room string (class detail, search rows).
@@ -936,13 +938,42 @@ el("div", { className: "rmeta" },
 ```
 (keep `seats` as the same string it is today).
 
-- [ ] **Step 4: Run** `uv run pytest -q web/tests` (with the two known unrelated failures deselected) → all pass.
+- [x] **Step 4: Run** `uv run pytest -q web/tests` (with the two known unrelated failures deselected) → all pass.
 
-- [ ] **Step 5: Local web commit** — `feat: room weekly schedule and room links`.
+- [x] **Step 5: Local web commit** — `feat: room weekly schedule and room links`.
 
 ### Task 7: Owner preview, publish, docs
 
-- [ ] **Step 1: Preview.** `make serve-prod` (static, exactly what ships); open `#rooms` and `#room/222-216` desktop and 390 px; take screenshots (Playwright) for the owner. **Stop and wait for the owner's approval.**
-- [ ] **Step 2: Publish after approval:** `git -C web push` (the web commits of Tasks 3–6 and the data commit).
-- [ ] **Step 3: Docs (scraper repo):** `docs/api.html` (static JSON list gains `classes/rooms-index.json`; `slots[].room`), the spec's Status → implemented with commit IDs, `docs/superpowers/plans/2026-09-29-per-meeting-rooms.md` Deferred → done, this plan's checkboxes; commit + push.
-- [ ] **Step 4: Verify live:** fetch `https://<site>/#rooms` data files (`data/classes/rooms-index.json` 200) after Pages deploys; record the date.
+- [x] **Step 1: Preview.** `make serve-prod` (static, exactly what ships); open `#rooms` and `#room/222-216` desktop and 390 px; take screenshots (Playwright) for the owner. **Stop and wait for the owner's approval.**
+- [x] **Step 2: Publish after approval:** `git -C web push` (the web commits of Tasks 3–6 and the data commit).
+- [x] **Step 3: Docs (scraper repo):** `docs/api.html` (static JSON list gains `classes/rooms-index.json`; `slots[].room`), the spec's Status → implemented with commit IDs, `docs/superpowers/plans/2026-09-29-per-meeting-rooms.md` Deferred → done, this plan's checkboxes; commit + push.
+- [x] **Step 4: Verify live:** fetch `https://<site>/#rooms` data files (`data/classes/rooms-index.json` 200) after Pages deploys; record the date.
+
+## Execution notes (2026-10-09)
+
+Implemented task by task by Sonnet subagents, reviewed in the main session
+(owner's instruction). Rulings and findings:
+
+- Tasks 5 and 6 were done in one dispatch (Task 5 alone would call the
+  undefined `renderRoomWeek`).
+- Default rooms term = `meta.cur || defaultSemester()` (`meta.cur` can be null
+  when the route first runs).
+- `btn-ghost` / `tt-grid` named in this plan do not exist in styles.css: the
+  button uses `button.ghost`; `#roomGrid` gets `overflow-x: hidden`. The
+  leftover `tt-grid room-grid` classes and a no-op 1040 px rule were removed
+  later at the owner's request.
+- Task 3 equivalence: `#ttGrid` innerHTML identical before/after for a
+  46-class sheet and an empty one.
+- `222-216` (named in Task 6's test and in the mock) has no simultaneous
+  two-room meeting — that class uses different rooms at different times; the
+  test derives a real two-room room from the data (e.g. `86-206` + `86-207`).
+- Review found the week grid clipped the finder window (grid range now
+  includes it), and the phone nav revealed the active tab before the web font
+  widened the tabs (re-revealed on `document.fonts.ready` and tab resize;
+  verified with the pre-fix strict test: 3/3 fail before, 5/5 pass after).
+  The 졸업요건 row fit is re-run on `document.fonts.ready` for the same reason.
+- Final suites: web 47 passed (the two known unrelated failures deselected:
+  `test_grad_golden` newest-year choice, `test_change_feed` row-text
+  uniqueness), scraper 246 passed.
+- Deferred minor: room names sort lexically within a building (`24-1001`
+  before `24-201`) in `freeRooms` and `build_rooms_index`.

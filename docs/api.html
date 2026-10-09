@@ -106,7 +106,12 @@ curl 'http://127.0.0.1:8011/api/search?name=경제&level=학사&day=0'</code></p
      and well-formed change-point encodings (integer indices below
      <code>t.length</code>, integer-or-null values) for the pass mask and every
      class metric. The explorer and graduation indexes validate their
-     cross-reference types before building maps.</p>
+     cross-reference types before building maps. Meeting slots carry
+     <code>room</code> (that time's rooms joined by <code>/</code>, <code>''</code> =
+     unknown) since 2026-10-09; <code>data/classes/rooms-index.json</code>
+     (<code>{"version": 1, "rooms": [[campus, building, name, last_year, last_term,
+     terms_seen], …]}</code>) feeds the 강의실 page's past-term rooms — a malformed
+     file only hides those rooms (rows that are not six strings/ints are dropped).</p>
   <h3 id="trend-format">Trend payload (v2, since 2026-09-27)</h3>
   <p><code>data/trend/trend_&lt;year&gt;_&lt;term&gt;.json</code> (the live window)
      and its frozen chunks <code>…_wNNN.json</code> share one shape:</p>
