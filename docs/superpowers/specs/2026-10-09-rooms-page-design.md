@@ -70,8 +70,10 @@ The Python implementation lives in the scraper (export); the JavaScript one in
 (`tests/fixtures/room_names.json`: raw → campus, building, name) so they cannot
 drift.
 
-**`web/data/rooms-index.json`** (new, written by `export_json.py` on every
-full export): one entry per normalized room —
+**`web/data/classes/rooms-index.json`** (new, written by `export_json.py` on every
+full export; under `data/classes/` because `scripts/publish.sh` stages only
+`data/classes/`, `data/trend/` and `explore-index.json`): one entry per
+normalized room —
 `[campus, building, name, last_year, last_term, terms_seen]` — plus a
 `generated` stamp. Built from `class_slots.room` of every stored term
 (including '/'-joined slot rooms split apart). Expected size: tens of KB.
