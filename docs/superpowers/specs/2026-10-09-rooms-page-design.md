@@ -21,6 +21,12 @@ Live check 2026-10-09 ~23:59 KST after the Pages deploy of `2f68c7d`:
 320 px the 졸업요건 page is 320 px wide with the main row stacked and the nav one row;
 no page errors.
 
+2026-10-10 (owner): the page's selects and the building input had no styles
+and rendered as browser defaults (Arial, square, grey box in dark mode). They now
+use the `.trend-feed-ctl select` declarations; web `855c6bb` (built on a branch,
+merged after approval), a light/dark computed-style test, live-checked after the
+Pages deploy.
+
 ## Why
 
 Per-meeting rooms are collected (`class_slots.room`, 2026-09-29) and exported
