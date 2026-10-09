@@ -1,0 +1,19 @@
+[
+  {"raw": "24-102", "campus": "관악", "building": "24", "name": "24-102"},
+  {"raw": "001-101", "campus": "관악", "building": "1", "name": "1-101"},
+  {"raw": "1-101", "campus": "관악", "building": "1", "name": "1-101"},
+  {"raw": "10-1-101", "campus": "관악", "building": "10-1", "name": "10-1-101"},
+  {"raw": "010-1-101", "campus": "관악", "building": "10-1", "name": "10-1-101"},
+  {"raw": "140-2-201", "campus": "관악", "building": "140-2", "name": "140-2-201"},
+  {"raw": "2-101-1", "campus": "관악", "building": "2", "name": "2-101-1"},
+  {"raw": "002-101-1", "campus": "관악", "building": "2", "name": "2-101-1"},
+  {"raw": "16-M304-2", "campus": "관악", "building": "16", "name": "16-M304-2"},
+  {"raw": "007-110-A", "campus": "관악", "building": "7", "name": "7-110-A"},
+  {"raw": "103-B101", "campus": "관악", "building": "103", "name": "103-B101"},
+  {"raw": "#12-102", "campus": "연건", "building": "12", "name": "12-102"},
+  {"raw": "#012-102", "campus": "연건", "building": "12", "name": "12-102"},
+  {"raw": "#17--108", "campus": "연건", "building": "17", "name": "17-108"},
+  {"raw": "#017--108", "campus": "연건", "building": "17", "name": "17-108"},
+  {"raw": "*102-103-218", "campus": "평창", "building": "102", "name": "102-103-218"},
+  {"raw": "*100-101-201", "campus": "평창", "building": "100", "name": "100-101-201"}
+]
