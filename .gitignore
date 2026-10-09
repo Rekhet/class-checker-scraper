@@ -11,6 +11,7 @@ __pycache__/
 *.egg-info/
 
 # Graph/indexing output and scratch directories.
+/.superpowers/
 /graphify-out/
 /docs/graphify-out/
 /_scrape/
