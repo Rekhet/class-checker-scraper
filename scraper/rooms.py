@@ -52,3 +52,27 @@ def building_rank(building: str) -> tuple:
     if all(_DIGITS.fullmatch(n) for n in nums):
         return (0, *[int(n) for n in nums])
     return (1, building)
+
+
+CAMPUS_ORDER = {DEFAULT_CAMPUS: 0, "연건": 1, "평창": 2}
+
+
+def build_rooms_index(conn) -> dict:
+    """Every room any stored term's meetings used, with its last term.
+
+    Term codes sort chronologically within a year (1학기 < 여름 < 2학기 <
+    겨울), so max((year, term)) is the latest term."""
+    seen: dict[str, tuple[Room, set]] = {}
+    for row in conn.execute(
+            "SELECT DISTINCT c.year, c.term, s.room FROM class_slots s"
+            " JOIN classes c ON c.id = s.class_id WHERE s.room <> ''").fetchall():
+        room = normalize_room(row[2])
+        if room is None:
+            continue
+        seen.setdefault(room.key, (room, set()))[1].add((row[0], row[1]))
+    out = []
+    for room, terms in sorted(seen.values(), key=lambda v: (
+            CAMPUS_ORDER.get(v[0].campus, 9), building_rank(v[0].building), v[0].name)):
+        year, term = max(terms)
+        out.append([room.campus, room.building, room.name, year, term, len(terms)])
+    return {"version": 1, "rooms": out}

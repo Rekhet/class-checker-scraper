@@ -58,6 +58,14 @@
   <p>Terms crawled before the room column existed were filled by
      <code>scraper/backfill_rooms.py</code> (see maintenance → <a href="maintenance.html#rooms">room backfill</a>);
      the Excel of every stored term back to 2020 still carries the column.</p>
+  <p><code>classes/rooms-index.json</code> (exported with the full catalog) lists every room
+     any stored meeting used, as <code>[campus, building, name, last_year, last_term,
+     terms_seen]</code>. Names are normalized by <code>scraper/rooms.py</code> so one room is
+     one key across terms: a leading <code>#</code> marks the 연건 campus and <code>*</code>
+     평창 (no prefix = 관악), and the 2020 terms and the 2021 여름학기 zero-pad each segment
+     (<code>001-101</code> = <code>1-101</code>). The building is an inference from the name,
+     used only for grouping and ordering. Observed 2026-10-09: 1,144 rooms (관악 1,094, 연건 39,
+     평창 11).</p>
 
   <div class="callout note"><span class="ic">⚙️</span>
     <p>The cell sweep is <strong>gated</strong>: it only runs for a term when the Excel

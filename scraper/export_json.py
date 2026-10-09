@@ -32,6 +32,7 @@ from pathlib import Path
 
 import db
 import process_lock
+import rooms
 
 OUT = Path(os.environ.get("JSON_OUT", "web/data"))
 # how many recent samples (refresh runs) to keep per term in the trend export
@@ -939,6 +940,7 @@ def main(argv: list[str] | None = None) -> None:
               f"({total} classes) to {classes_dir}")
         _export_explore(conn, terms,
                         lambda obj: _write_stamped(OUT / "explore-index.json", obj))
+        _write_stamped(classes_dir / "rooms-index.json", rooms.build_rooms_index(conn))
     finally:
         conn.close()
 

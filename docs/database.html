@@ -83,6 +83,13 @@
      time with <code>room</code> joining its rooms by <code>/</code>, like
      <code>classes.room</code>: <code>{"class_id", "day_index", "period", "start_time",
      "end_time", "room"}</code> (<code>room</code> in the exported JSON since 2026-10-09).</p>
+  <p>Exported alongside the catalog: <code>classes/rooms-index.json</code> =
+     <code>{"version": 1, "rooms": [[campus, building, name, last_year, last_term,
+     terms_seen], ...]}</code>, built from the distinct non-empty <code>class_slots.room</code>
+     values of every stored term. Campus prefixes (<code>#</code> 연건, <code>*</code> 평창) are
+     split off into <code>campus</code>; the 2020 terms and the 2021 여름학기 zero-pad segments,
+     so those are normalized (<code>001-101</code> → <code>1-101</code>) to merge with later
+     terms. <code>building</code> is an inference from the name, used only for grouping.</p>
 
   <h3 id="t-other">terms &amp; crawl_runs</h3>
   <p><code>terms(term PK, year, label)</code> backs the semester selectors.
