@@ -22,7 +22,7 @@
 **Spec:** `docs/specs/2026-10-16-syllabus-links-design.md` (approved, governance
 `class-checker` D-000026)
 
-## Global constraints
+## Global Constraints
 
 - **Rate:** sugang at most 10 requests/s. Requests are sequential, with a 0.1 s
   minimum interval.
