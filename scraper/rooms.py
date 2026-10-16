@@ -4,7 +4,7 @@ The Excel's 강의실 value carries the campus as a prefix (header legend
 `강의실(동-호)(#연건, *평창)`); the 2020 terms and 2021 여름학기 zero-pad
 segments (`001-101`) that every later term writes `1-101`. Normalizing both
 makes one room one key across terms. The building is an INFERENCE used only
-for grouping (spec docs/superpowers/specs/2026-10-09-rooms-page-design.md);
+for grouping (spec docs/specs/2026-10-09-rooms-page-design.md);
 web/app.js `normRoom` is the JavaScript twin, and both are tested against
 tests/fixtures/room_names.json.
 """

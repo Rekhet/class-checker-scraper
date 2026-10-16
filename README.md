@@ -102,7 +102,7 @@ actual `ExecMainStartTimestamp`. A failed, unavailable, or never-run collector
 therefore leaves the window state in place and returns failure. Automatic retry
 of that failed window remains deferred.
 
-The remaining hardening items are recorded in the [implementation plan](docs/superpowers/plans/2026-08-03-cart-window-systemd-timer.md#post-implementation-audit-2026-08-04): lock-wait retry policy, automatic retry after failed cleanup validation, forced-count cart semantics, transactional rebuild recovery, publication staging isolation, and direct-wrapper process-group handling.
+The remaining hardening items are recorded in the [implementation plan](docs/plans/2026-08-03-cart-window-systemd-timer.md#post-implementation-audit-2026-08-04): lock-wait retry policy, automatic retry after failed cleanup validation, forced-count cart semantics, transactional rebuild recovery, publication staging isolation, and direct-wrapper process-group handling.
 
 ## Verification
 

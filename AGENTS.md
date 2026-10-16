@@ -12,7 +12,7 @@ For automation changes, check at least:
 - `systemd/README.md` for units, timers, installation, locking, and publication;
 - `docs/maintenance.html` for operator procedures, recovery, and troubleshooting;
 - `docs/crawl.html` for collection sources, windows, and metric semantics; and
-- the relevant `docs/superpowers/plans/` decision or implementation document for
+- the relevant `docs/plans/` decision or implementation document for
   status, rationale, deferred work, and verification results.
 
 Record observed dates, unit names, commit IDs, and pending live verification
@@ -72,7 +72,7 @@ Consequences every change must respect:
   soften that path.
 
 The historical blocker audit at
-`docs/superpowers/audits/2026-08-03-class-checker-blockers.md` must remain
+`docs/audits/2026-08-03-class-checker-blockers.md` must remain
 unchanged unless the user explicitly requests an update. The `web/` directory
 is a separate public deployment repository and must not be changed for private
 automation or documentation work unless the user explicitly includes it in

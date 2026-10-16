@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.14 (scraper, pytest/unittest), vanilla JS single file `web/app.js`, HTML partials, `web/styles.css`, Playwright tests in `web/tests/`.
 
-**Spec:** `docs/superpowers/specs/2026-10-09-rooms-page-design.md`
+**Spec:** `docs/specs/2026-10-09-rooms-page-design.md`
 
 **Status (2026-10-09):** executed — every task done and published; deviations and rulings in the spec's Status and the execution notes below.
 
@@ -117,7 +117,7 @@ The Excel's 강의실 value carries the campus as a prefix (header legend
 `강의실(동-호)(#연건, *평창)`); the 2020 terms and 2021 여름학기 zero-pad
 segments (`001-101`) that every later term writes `1-101`. Normalizing both
 makes one room one key across terms. The building is an INFERENCE used only
-for grouping (spec docs/superpowers/specs/2026-10-09-rooms-page-design.md);
+for grouping (spec docs/specs/2026-10-09-rooms-page-design.md);
 web/app.js `normRoom` is the JavaScript twin, and both are tested against
 tests/fixtures/room_names.json.
 """
@@ -946,7 +946,7 @@ el("div", { className: "rmeta" },
 
 - [x] **Step 1: Preview.** `make serve-prod` (static, exactly what ships); open `#rooms` and `#room/222-216` desktop and 390 px; take screenshots (Playwright) for the owner. **Stop and wait for the owner's approval.**
 - [x] **Step 2: Publish after approval:** `git -C web push` (the web commits of Tasks 3–6 and the data commit).
-- [x] **Step 3: Docs (scraper repo):** `docs/api.html` (static JSON list gains `classes/rooms-index.json`; `slots[].room`), the spec's Status → implemented with commit IDs, `docs/superpowers/plans/2026-09-29-per-meeting-rooms.md` Deferred → done, this plan's checkboxes; commit + push.
+- [x] **Step 3: Docs (scraper repo):** `docs/api.html` (static JSON list gains `classes/rooms-index.json`; `slots[].room`), the spec's Status → implemented with commit IDs, `docs/plans/2026-09-29-per-meeting-rooms.md` Deferred → done, this plan's checkboxes; commit + push.
 - [x] **Step 4: Verify live:** fetch `https://<site>/#rooms` data files (`data/classes/rooms-index.json` 200) after Pages deploys; record the date.
 
 ## Execution notes (2026-10-09)

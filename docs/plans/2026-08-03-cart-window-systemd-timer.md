@@ -54,7 +54,7 @@ collection and journal verification for 8/7–8/11 remain pending until those
 dates execute.
 
 Related audit note:
-`docs/superpowers/audits/2026-08-03-class-checker-blockers.md`
+`docs/audits/2026-08-03-class-checker-blockers.md`
 
 ## Blocker-remediation progress
 

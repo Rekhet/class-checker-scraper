@@ -8,7 +8,7 @@
 
 **Tech Stack:** Vanilla browser JS (classic `<script>`, globals on `window`, `"use strict"` at file top but **no** IIFE wrapper — so `_gradAuditBlock`, `_loadCodeEquiv`, `el`, `_gradState` are all reachable by bare name in `preview_eval`). No bundler, no JS test runner, no HMR.
 
-**Spec:** `docs/superpowers/specs/2026-06-25-grad-req-cross-dept-recognition-design.md`
+**Spec:** `docs/specs/2026-06-25-grad-req-cross-dept-recognition-design.md`
 
 ---
 

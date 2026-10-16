@@ -8,7 +8,7 @@
 
 **Tech Stack:** Vanilla browser JS (classic script, globals reachable from the page), localStorage. No JS test runner exists, so each task is verified with `preview_eval` assertions against live `meta`/`timetable`/localStorage in the running preview.
 
-**Spec:** `docs/superpowers/specs/2026-06-24-semester-toggle-design.md`
+**Spec:** `docs/specs/2026-06-24-semester-toggle-design.md`
 
 **Repo note:** the git repository root is `web/` (the project root is not a repo). All paths below are relative to `web/`. Commit with `git -C web …` from the project root, or `git …` from inside `web/`.
 

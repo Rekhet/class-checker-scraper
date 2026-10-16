@@ -451,7 +451,7 @@ def _now_iso() -> str:
 # column is single-professor, and its only commas are name-internal in romanized
 # "Last, First" English names (e.g. "Kim, Joon Kium"); splitting on comma would
 # shatter every English-named professor into two phantom identities. See the Task 1
-# Investigation Findings in docs/superpowers/plans/2026-07-01-professor-identity.md.
+# Investigation Findings in docs/plans/2026-07-01-professor-identity.md.
 _PROF_DELIMS = re.compile(r"\s*[/·、；;]\s*")
 
 

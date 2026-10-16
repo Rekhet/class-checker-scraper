@@ -94,6 +94,6 @@ Owner's order: the data format first, the screen design afterwards, together.
 
 - ~~Time-picker empty-room search and a room pool of past-term rooms~~ —
   done 2026-10-09: the 강의실 page
-  (`docs/superpowers/specs/2026-10-09-rooms-page-design.md`).
+  (`docs/specs/2026-10-09-rooms-page-design.md`).
 - `server.py` admin stats count `class_slots` rows, so a two-room meeting
   counts twice there.

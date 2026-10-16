@@ -6,7 +6,7 @@ Design approved section by section by the owner on 2026-10-09 (3 sections +
 an interactive HTML mock on real 2026 2학기 data). Implemented and published
 2026-10-09: scraper `01ce0d3`, `7065451` (normalizer, `rooms-index.json`);
 web `607f0e2`..`2f68c7d` pushed to the site. Plan:
-`docs/superpowers/plans/2026-10-09-rooms-page.md`.
+`docs/plans/2026-10-09-rooms-page.md`.
 
 Changed after approval, by the owner at the preview: the 강의실 tab sits
 before 졸업요건; at phone width the top nav stays one row and only the tab
