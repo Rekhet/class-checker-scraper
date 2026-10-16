@@ -42,11 +42,11 @@ import json
 import os
 import sys
 import time
-import urllib.parse
-import urllib.request
 import zlib
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
+import requests
 
 try:
     from . import db
@@ -181,12 +181,19 @@ def roster(remote, year: str, term: str) -> list[tuple[str, str, str]]:
 
 
 class Http:
-    """POST form data, return the parsed JSON body."""
+    """POST form data over one reused connection, return the parsed JSON body.
+    Cookies are dropped after every response, so none are sent back."""
+
+    def __init__(self) -> None:
+        self.session = requests.Session()
 
     def post(self, url: str, data: dict, headers: dict) -> dict:
-        req = urllib.request.Request(url, urllib.parse.urlencode(data).encode(), headers)
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read().decode("utf-8"))
+        try:
+            r = self.session.post(url, data=data, headers=headers, timeout=30)
+            r.raise_for_status()
+            return r.json()
+        finally:
+            self.session.cookies.clear()
 
 
 def _fetch_one(http, year: str, term: str, k: tuple[str, str, str]) -> dict:
@@ -298,7 +305,8 @@ def collect(terms, *, dry_run: bool = False, force: bool = False,
 def pull(remote, local, *, now: str, max_age_hours: float = MAX_AGE_HOURS,
          targets: list[tuple[str, str]]) -> dict:
     """Copy every cloud row whose digest differs from the local one. A target
-    term with no cloud row, or checked too long ago, is stale."""
+    term with no cloud row is `uncollected`, one checked too long ago is `stale`;
+    both make the CLI exit 3."""
     now_dt = datetime.fromisoformat(now)
     have = {(r[0], r[1]): r[2] for r in local.execute(
         "SELECT year, term, digest FROM syllabus_attach_snapshots").fetchall()}
@@ -306,7 +314,7 @@ def pull(remote, local, *, now: str, max_age_hours: float = MAX_AGE_HOURS,
         "SELECT year, term, digest, classes, missing, collected_at, checked_at, payload"
         " FROM syllabus_attach_snapshots ORDER BY year, term").fetchall()
     applied, stale = [], []
-    stale += [t for t in targets if t not in {(r[0], r[1]) for r in rows}]
+    uncollected = [t for t in targets if t not in {(r[0], r[1]) for r in rows}]
     for row in rows:
         year, term, digest, checked_at = row[0], row[1], row[2], row[6]
         if (year, term) in set(targets) and \
@@ -320,7 +328,8 @@ def pull(remote, local, *, now: str, max_age_hours: float = MAX_AGE_HOURS,
             " VALUES (?,?,?,?,?,?,?,?)", tuple(row))
         applied.append((year, term))
     local.commit()
-    return {"terms": len(rows), "applied": applied, "stale": stale}
+    return {"terms": len(rows), "applied": applied, "stale": stale,
+            "uncollected": uncollected}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -382,10 +391,15 @@ def main(argv: list[str] | None = None) -> int:
             local.close()
         print(f"syllabus snapshots: {out['terms']} term(s), applied "
               f"{[f'{y}/{t}' for y, t in out['applied']]}", flush=True)
+        if out["uncollected"]:
+            print(f"error: no syllabus snapshot collected yet: "
+                  f"{[f'{y}/{t}' for y, t in out['uncollected']]} (collect-syllabus never ran "
+                  f"for it?)", file=sys.stderr)
         if out["stale"]:
             print(f"error: syllabus snapshot not refreshed for over "
                   f"{args.max_age_hours:g} h: {[f'{y}/{t}' for y, t in out['stale']]} "
                   f"(collect-syllabus stopped?)", file=sys.stderr)
+        if out["stale"] or out["uncollected"]:
             return 3
         return 4 if out["applied"] else 0
 

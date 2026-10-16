@@ -214,6 +214,73 @@ class PublishScriptTests(unittest.TestCase):
             self.assertTrue(any(call.endswith("rev-list --count @{upstream}..HEAD") for call in calls))
             self.assertTrue(any(call.endswith("push") for call in calls))
 
+    def _publish_with_export_status(self, status: int):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        project = Path(tmp.name)
+        scripts = project / "scripts"
+        scripts.mkdir()
+        shutil.copy2(ROOT / "scripts/publish.sh", scripts / "publish.sh")
+        (project / "web").mkdir()
+        fake_bin = project / "bin"
+        fake_bin.mkdir()
+        git_log = project / "git.log"
+        _executable(
+            fake_bin / "git",
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$*\" >> \"$PUBLISH_GIT_LOG\"\n"
+            "if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"diff\" ]; then exit 1; fi\n"
+            "if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"rev-list\" ]; then printf '1\\n'; fi\n"
+            "if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"rev-parse\" ]; then printf '%s\\n' \"$2\"; fi\n"
+            "exit 0\n")
+        fake_python = fake_bin / "python"
+        _executable(fake_python, f"#!/bin/sh\nexit {status}\n")
+        env = os.environ.copy()
+        env.update({"PATH": f"{fake_bin}:{env['PATH']}", "PUBLISH_GIT_LOG": str(git_log),
+                    "PUBLISH_GIT": "1", "PUBLISH_PUSH": "1",
+                    "CLASS_CHECKER_PROCESS_LOCK_HELD": "1", "PY": str(fake_python)})
+        result = subprocess.run(["bash", str(scripts / "publish.sh"), "full"], cwd=project,
+                                env=env, check=False, capture_output=True, text=True)
+        log = git_log.read_text(encoding="utf-8") if git_log.exists() else ""
+        return result, log
+
+    def test_export_exit_5_still_commits_and_pushes_then_exits_5(self) -> None:
+        result, log = self._publish_with_export_status(5)
+        self.assertEqual(result.returncode, 5, result.stderr)
+        self.assertIn("commit", log)
+        self.assertIn("push", log)
+        self.assertIn("error: published, but the syllabus export skipped a term",
+                      result.stderr)
+
+    def test_any_other_export_failure_publishes_nothing(self) -> None:
+        result, log = self._publish_with_export_status(2)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("commit", log)
+        self.assertNotIn("push", log)
+
+    def test_update_runs_its_checks_and_exits_5_last(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run, calls = self._catalog_sandbox(tmp, pull_status=0)
+            (Path(tmp) / "bin" / "python").write_text(
+                "#!/bin/sh\n"
+                f"printf '%s\\n' \"$*\" >> '{calls}'\n"
+                'case "$*" in *export_json.py*) exit 5;; esac\n'
+                "exit 0\n", encoding="utf-8")
+            result = run()
+            self.assertEqual(result.returncode, 5, result.stderr)
+            self.assertIn("skipped a term", result.stderr)
+
+    def test_update_exit_1_checks_still_win_over_5(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run, calls = self._catalog_sandbox(tmp, pull_status=3)
+            (Path(tmp) / "bin" / "python").write_text(
+                "#!/bin/sh\n"
+                'case "$*" in *catalog_snapshot*pull*) exit 3;; *export_json.py*) exit 5;; esac\n'
+                "exit 0\n", encoding="utf-8")
+            result = run()
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("upcoming-term catalog", result.stderr)
+
     def test_counts_wrapper_forces_commit_only_publication(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)

@@ -188,9 +188,15 @@ fi
 EXPORT_SCOPE="current"
 [ "$UPDATE_CRAWL" = "1" ] && EXPORT_SCOPE="all"
 [ "$CATALOG_PULLED" = "1" ] && EXPORT_SCOPE="all"
+# publish.sh exits 5 when it published but skipped a syllabus term: keep going
+# so the checks below still run, and exit 5 last. Other failures abort as before.
+publish_status=0
 YEAR="$UPDATE_YEAR" SEM="$UPDATE_SEM" EXPORT_SCOPE="$EXPORT_SCOPE" \
 PUBLISH_COMMIT_MESSAGE="${PUBLISH_COMMIT_MESSAGE:-chore(data): update}" \
-  "$ROOT/scripts/publish.sh" full
+  "$ROOT/scripts/publish.sh" full || publish_status=$?
+if [ "$publish_status" != "0" ] && [ "$publish_status" != "5" ]; then
+  exit "$publish_status"
+fi
 
 if [ "$DRIFT_FAILED" = "1" ]; then
   echo "error: published, but the catalog drift crawl failed" >&2
@@ -207,4 +213,7 @@ fi
 if [ "$SYNC_STALE" = "1" ]; then
   echo "error: published, but no fresh counts arrived and the collection window is open" >&2
   exit 1
+fi
+if [ "$publish_status" = "5" ]; then
+  exit 5
 fi

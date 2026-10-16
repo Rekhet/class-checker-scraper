@@ -210,6 +210,36 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(set(attach["A|001|000"]), {"ko", "en"})
 
 
+class HttpTests(unittest.TestCase):
+    def test_one_session_is_reused_and_cookies_are_not_sent_back(self) -> None:
+        sessions = []
+
+        class FakeResp:
+            def raise_for_status(self): pass
+            def json(self): return {"LISTTAB03_LIST_ATTACH": []}
+
+        class FakeJar:
+            cleared = 0
+            def clear(self): FakeJar.cleared += 1
+
+        class FakeSession:
+            def __init__(self):
+                sessions.append(self)
+                self.cookies, self.calls = FakeJar(), []
+            def post(self, url, data=None, headers=None, timeout=None):
+                self.calls.append((url, data, headers, timeout))
+                return FakeResp()
+
+        with patch.object(sa.requests, "Session", FakeSession):
+            http = sa.Http()
+            a = http.post(sa.URL, {"x": "1"}, sa.HEADERS)
+            http.post(sa.URL, {"x": "2"}, sa.HEADERS)
+        self.assertEqual(a, {"LISTTAB03_LIST_ATTACH": []})
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0].calls[0], (sa.URL, {"x": "1"}, sa.HEADERS, 30))
+        self.assertEqual(FakeJar.cleared, 2)
+
+
 class RosterTests(unittest.TestCase):
     def test_target_terms(self) -> None:
         env = {"COUNT_YEAR": "2026", "COUNT_SEM": "fall",
@@ -382,6 +412,23 @@ class CollectTests(unittest.TestCase):
         self.assertNotIn(sa.key(*keys[8]), data["classes"])               # no previous
         self.assertEqual(data["missing"], [sa.key(*keys[8])])
 
+    def test_a_carried_class_keeps_an_unchanged_term_unchanged(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+        remote, keys = self._setup(100)
+        first = FakeHttp({keys[7]: _fix("ko_only")})
+        self._collect([("2026", FALL)], remote, first)
+        before = remote.execute("SELECT digest, collected_at FROM"
+                                " syllabus_attach_snapshots").fetchone()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc, _ = self._collect([("2026", FALL)], remote,
+                                  FakeHttp({keys[7]: _fix("ko_only")}, fail={keys[7]}))
+        self.assertEqual(rc, 0)
+        self.assertIn("unchanged", buf.getvalue())
+        self.assertEqual(remote.execute("SELECT digest, collected_at FROM"
+                                        " syllabus_attach_snapshots").fetchone(), before)
+
     def test_force_bypasses_the_shrink_guard_only(self) -> None:
         remote, keys = self._setup(50)
         big = sa.build_snapshot("2026", FALL, {f"X{i:03d}|001|000": {} for i in range(100)},
@@ -431,7 +478,8 @@ class PullTests(unittest.TestCase):
         remote, local = _remote(), self._local()
         sa.push(remote, self._snap(FALL), now=T0)
         out = sa.pull(remote, local, now=T0, targets=[("2026", FALL)])
-        self.assertEqual(out, {"terms": 1, "applied": [("2026", FALL)], "stale": []})
+        self.assertEqual(out, {"terms": 1, "applied": [("2026", FALL)], "stale": [],
+                               "uncollected": []})
         row = local.execute("SELECT digest, classes, missing, checked_at, payload FROM"
                             " syllabus_attach_snapshots").fetchone()
         self.assertEqual(row[:4], (self._snap(FALL)["digest"], 1, 0, T0))
@@ -458,7 +506,8 @@ class PullTests(unittest.TestCase):
         remote, local = _remote(), self._local()
         sa.push(remote, self._snap(FALL), now=T0)
         out = sa.pull(remote, local, now=T0, targets=[("2026", FALL), ("2026", WINTER)])
-        self.assertEqual(out["stale"], [("2026", WINTER)])
+        self.assertEqual(out["uncollected"], [("2026", WINTER)])   # its own list
+        self.assertEqual(out["stale"], [])
 
     def test_exactly_48_hours_is_not_stale(self) -> None:
         remote, local = _remote(), self._local()
@@ -476,21 +525,32 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / "local.db"
             sqlite3.connect(dest).close()
-            with patch.object(sa, "open_local", return_value=self.local), \
+            import io
+            from contextlib import redirect_stderr
+            buf = io.StringIO()
+            self.addCleanup(lambda: None)
+            with redirect_stderr(buf), patch.object(sa, "open_local", return_value=self.local), \
                  patch.object(sa, "_remote", return_value=_KeepOpen(remote)), \
                  patch.dict("os.environ", {"COUNT_YEAR": "2026", "COUNT_SEM": "fall",
                                            "UPCOMING_TERMS": "", **env}):
-                return sa.main(argv + ["--dest", str(dest)] if argv[0] == "pull" else argv)
+                try:
+                    return sa.main(argv + ["--dest", str(dest)] if argv[0] == "pull" else argv)
+                finally:
+                    self.err = buf.getvalue()
 
     def test_exit_codes(self) -> None:
         remote = _remote()
         self.assertEqual(self._run(["pull"], remote), 3)   # target term never collected
+        self.assertIn("no syllabus snapshot collected yet", self.err)
+        self.assertNotIn("not refreshed", self.err)
         snap = sa.build_snapshot("2026", FALL, {"A|001|000": {}}, [], collected_at=T0)
         sa.push(remote, snap, now=sa._now())
         self.assertEqual(self._run(["pull"], remote), 4)
         self.assertEqual(self._run(["pull"], remote), 0)
         sa.push(remote, snap, now="2020-01-01T00:00:00+09:00")
         self.assertEqual(self._run(["pull"], remote), 3)
+        self.assertIn("not refreshed for over 48 h", self.err)
+        self.assertNotIn("no syllabus snapshot", self.err)
 
     def test_dest_must_be_a_local_file(self) -> None:
         with self.assertRaisesRegex(SystemExit, "local file"):

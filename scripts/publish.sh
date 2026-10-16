@@ -18,6 +18,25 @@ export DB_BACKEND="${DB_BACKEND:-turso}"
 export TURSO_DATABASE_URL="${TURSO_DATABASE_URL:-data/turso.db}"
 MODE="${1:-full}"
 
+# export_json.py exits 5 when it skipped a syllabus term but wrote everything
+# else: publish as usual, then fail the run at the end. Any other non-zero
+# status aborts before anything is committed.
+EXPORT_STATUS=0
+run_export() {
+  EXPORT_STATUS=0
+  "$@" || EXPORT_STATUS=$?
+  if [ "$EXPORT_STATUS" != "0" ] && [ "$EXPORT_STATUS" != "5" ]; then
+    exit "$EXPORT_STATUS"
+  fi
+}
+finish() {
+  if [ "$EXPORT_STATUS" = "5" ]; then
+    echo "error: published, but the syllabus export skipped a term" >&2
+    exit 5
+  fi
+  exit "${1:-0}"
+}
+
 # Standalone publishing is safe too. update.sh/update-counts.sh already hold the
 # lock, and the environment marker prevents a nested acquisition.
 if [ "${CLASS_CHECKER_PROCESS_LOCK_HELD:-}" != "1" ]; then
@@ -42,10 +61,10 @@ case "$MODE" in
     # the collected term's class file, trend, and index entry: past terms and
     # the explore index change only with a catalog crawl.
     if [ "${EXPORT_SCOPE:-all}" = "current" ]; then
-      "$PY" scraper/export_json.py --current \
+      run_export "$PY" scraper/export_json.py --current \
         --years "${YEAR:-${COUNT_YEAR:-}}" --terms "${SEM:-${COUNT_SEM:-}}"
     else
-      "$PY" scraper/export_json.py
+      run_export "$PY" scraper/export_json.py
     fi
     MESSAGE="${PUBLISH_COMMIT_MESSAGE:-chore(data): update}"
     PUSH_ALLOWED=1
@@ -57,7 +76,7 @@ case "$MODE" in
       echo "error: set YEAR/SEM or COUNT_YEAR/COUNT_SEM for trend publication" >&2
       exit 2
     fi
-    "$PY" scraper/export_json.py --trend-only \
+    run_export "$PY" scraper/export_json.py --trend-only \
       --years "$PUBLISH_YEAR" --terms "$PUBLISH_SEM"
     # The class index is the pointer that tells the static UI where the trend
     # file lives. The class catalog itself is intentionally not rewritten by a
@@ -75,7 +94,7 @@ esac
 
 if [ "$PUBLISH_GIT" = "0" ]; then
   echo "export complete; no Git commit/push performed"
-  exit 0
+  finish 0
 fi
 
 if [ "$MODE" = "full" ]; then
@@ -102,12 +121,12 @@ if [ "$PUSH_ALLOWED" = "0" ]; then
   else
     echo "trend commits retained locally; the hourly full update will push them"
   fi
-  exit 0
+  finish 0
 fi
 
 if [ "${PUBLISH_PUSH:-1}" = "0" ]; then
   echo "Git push disabled (PUBLISH_PUSH=0); local commits retained"
-  exit 0
+  finish 0
 fi
 
 if ! AHEAD="$(git -C "$WEB_ROOT" rev-list --count '@{upstream}..HEAD' 2>/dev/null)"; then
@@ -141,3 +160,4 @@ if [ "$AHEAD" -gt 0 ]; then
 else
   echo "no local commits to push"
 fi
+finish 0

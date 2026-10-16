@@ -424,12 +424,17 @@ def _write_stamped(path: Path, obj: dict, field: str = "generated") -> int:
     return _write(path, {**obj, field: _now_iso()})
 
 
-def export_syllabus(conn, out_dir: Path) -> int:
+SYLLABUS_SKIPPED_EXIT = 5   # a syllabus term was skipped; the rest was written
+
+
+def export_syllabus(conn, out_dir: Path, skipped: list | None = None) -> int:
     """Write out_dir/syllabus/<year>_<term>.json for every local snapshot row.
 
     Keys drop the subject-section code (`sbjt|lt|subh` -> `sbjt|lt`); two
-    keys that collapse to one raise instead of picking a winner. Classes in the
-    snapshot's `missing` list are left out, `{}` (no attachment) is kept."""
+    keys that collapse to one are an error. A term that fails (collision, broken
+    payload) is skipped on its own: its previous file stays, a warning is
+    printed and "year/term" is appended to `skipped`. Returns the files written.
+    Classes in the snapshot's `missing` list are left out, `{}` is kept."""
     try:
         rows = conn.execute("SELECT year, term, payload FROM syllabus_attach_snapshots"
                             " ORDER BY year, term").fetchall()
@@ -437,21 +442,29 @@ def export_syllabus(conn, out_dir: Path) -> int:
         if "no such table" in str(exc):
             return 0
         raise
+    written = 0
     for year, term, blob in rows:
-        snap = json.loads(zlib.decompress(blob).decode("utf-8"))
-        skip = set(snap.get("missing", []))
-        classes: dict = {}
-        for k in sorted(snap["classes"]):
-            if k in skip:
-                continue
-            short = "|".join(k.split("|")[:2])
-            if short in classes:
-                raise ValueError(f"syllabus {year} {term}: {short} has more than one subh")
-            classes[short] = snap["classes"][k]
-        _write_stamped(out_dir / "syllabus" / f"{year}_{term}.json",
-                       {"year": year, "term": term,
-                        "collected_at": snap["collected_at"], "classes": classes})
-    return len(rows)
+        try:
+            snap = json.loads(zlib.decompress(bytes(blob)).decode("utf-8"))
+            skip = set(snap.get("missing", []))
+            classes: dict = {}
+            for k in sorted(snap["classes"]):
+                if k in skip:
+                    continue
+                short = "|".join(k.split("|")[:2])
+                if short in classes:
+                    raise ValueError(f"syllabus {year} {term}: {short} has more than one subh")
+                classes[short] = snap["classes"][k]
+            obj = {"year": year, "term": term,
+                   "collected_at": snap["collected_at"], "classes": classes}
+        except Exception as exc:  # noqa: BLE001 - one bad term must not stop the export
+            print(f"warn: syllabus export skipped {year}/{term}: {exc}", file=sys.stderr)
+            if skipped is not None:
+                skipped.append(f"{year}/{term}")
+            continue
+        _write_stamped(out_dir / "syllabus" / f"{year}_{term}.json", obj)
+        written += 1
+    return written
 
 
 def select_term_codes(spec: str | None) -> list[str]:
@@ -919,9 +932,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> int:
+    """0, or SYLLABUS_SKIPPED_EXIT when a syllabus term was skipped (everything
+    else is still written)."""
     args = build_arg_parser().parse_args(argv)
     conn = db.connect()
+    skipped: list[str] = []
     try:
         OUT.mkdir(parents=True, exist_ok=True)
         if args.trend_only or args.current:
@@ -932,8 +948,9 @@ def main(argv: list[str] | None = None) -> None:
             written = export_trend_only(conn, years=years, terms=terms,
                                         with_classes=args.current)
             print(f"wrote {written} term(s) under {OUT}")
-            print(f"wrote {export_syllabus(conn, OUT)} syllabus file(s) under {OUT / 'syllabus'}")
-            return
+            print(f"wrote {export_syllabus(conn, OUT, skipped)} syllabus file(s) "
+                  f"under {OUT / 'syllabus'}")
+            return SYLLABUS_SKIPPED_EXIT if skipped else 0
 
         classes_dir = OUT / "classes"; trend_dir = OUT / "trend"   # class catalog + trend live in subdirs
         classes_dir.mkdir(exist_ok=True); trend_dir.mkdir(exist_ok=True)
@@ -973,7 +990,9 @@ def main(argv: list[str] | None = None) -> None:
         _export_explore(conn, terms,
                         lambda obj: _write_stamped(OUT / "explore-index.json", obj))
         _write_stamped(classes_dir / "rooms-index.json", rooms.build_rooms_index(conn))
-        print(f"wrote {export_syllabus(conn, OUT)} syllabus file(s) under {OUT / 'syllabus'}")
+        print(f"wrote {export_syllabus(conn, OUT, skipped)} syllabus file(s) "
+              f"under {OUT / 'syllabus'}")
+        return SYLLABUS_SKIPPED_EXIT if skipped else 0
     finally:
         conn.close()
 
@@ -983,7 +1002,8 @@ if __name__ == "__main__":
             else process_lock.ProcessLock())
     try:
         with lock:
-            main()
+            rc = main()
+        raise SystemExit(rc)
     except process_lock.LockTimeout as exc:
         print(f"process lock busy: {exc}", file=sys.stderr)
         raise SystemExit(process_lock.LOCK_TIMEOUT_EXIT)
