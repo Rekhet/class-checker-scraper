@@ -140,6 +140,29 @@ if [ -f "$ROOT/turso-remote.env" ]; then
   esac
 fi
 
+# Syllabus attachment links: the collect-syllabus runner (daily 04:40 KST)
+# writes one row per term to the cloud table syllabus_attach_snapshots; this
+# run copies changed rows into the local file (scraper/syllabus_attach.py pull)
+# and the export below turns them into web/data/syllabus/. Exit 0 = nothing
+# changed, 4 = rows applied (both fine: the export runs every time), 3 = a
+# target term not refreshed for 48 h (runner stopped); 3 and any other failure
+# still publish and fail the run at the end (alert).
+SYLLABUS_FAILED=0
+if [ -f "$ROOT/turso-remote.env" ]; then
+  syllabus_status=0
+  (
+    set -a
+    . "$ROOT/turso-remote.env"
+    set +a
+    "$PY" -m scraper.syllabus_attach pull --dest "$LOCAL_DB"
+  ) || syllabus_status=$?
+  case "$syllabus_status" in
+    0|4) ;;
+    *) SYLLABUS_FAILED=1
+       echo "warn: syllabus attachment pull failed or is stale; publishing without it" >&2 ;;
+  esac
+fi
+
 # Copy the newest sample onto the catalog's volatile columns: the static export
 # reads them off `classes`, which no longer moves on its own without a crawl.
 # With no fresh input this run, ask it to report staleness as an exit code.
@@ -175,6 +198,10 @@ if [ "$DRIFT_FAILED" = "1" ]; then
 fi
 if [ "$CATALOG_FAILED" = "1" ]; then
   echo "error: published, but the upcoming-term catalog pull failed or is stale" >&2
+  exit 1
+fi
+if [ "$SYLLABUS_FAILED" = "1" ]; then
+  echo "error: published, but the syllabus attachment pull failed or is stale" >&2
   exit 1
 fi
 if [ "$SYNC_STALE" = "1" ]; then

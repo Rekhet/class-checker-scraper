@@ -80,6 +80,10 @@ fi
 
 if [ "$MODE" = "full" ]; then
   git -C "$WEB_ROOT" add data/classes/ data/trend/ data/explore-index.json
+  # absent until the first syllabus export; git add fails on a missing path
+  if [ -d "$WEB_ROOT/data/syllabus" ]; then
+    git -C "$WEB_ROOT" add data/syllabus/
+  fi
 else
   git -C "$WEB_ROOT" add data/trend/ data/classes/index.json
 fi

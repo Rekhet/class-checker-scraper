@@ -473,6 +473,37 @@ class PublishScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn("catalog_snapshot", calls.read_text(encoding="utf-8"))
 
+    def test_syllabus_pull_runs_with_cloud_credentials_and_targets_the_local_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run, calls = self._catalog_sandbox(tmp, pull_status=0)
+
+            result = run()
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("-m scraper.syllabus_attach pull --dest data/turso.db "
+                          "| libsql://example.turso.io", calls.read_text(encoding="utf-8"))
+
+    def test_syllabus_pull_exit_4_is_fine_and_3_or_failure_fails_after_publishing(self) -> None:
+        for status, expect_fail in ((4, False), (3, True), (1, True)):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as tmp:
+                run, calls = self._catalog_sandbox(tmp, pull_status=0)
+                (Path(tmp) / "bin" / "python").write_text(
+                    "#!/bin/sh\n"
+                    f"printf '%s\\n' \"$*\" >> '{calls}'\n"
+                    f'case "$*" in *syllabus_attach*pull*) exit {status};; esac\n'
+                    "exit 0\n", encoding="utf-8")
+                result = run()
+                self.assertEqual(result.returncode, 1 if expect_fail else 0, result.stderr)
+                if expect_fail:
+                    self.assertIn("syllabus attachment", result.stderr)
+                self.assertIn("export_json.py", calls.read_text(encoding="utf-8"))
+
+    def test_no_cloud_credentials_skip_the_syllabus_pull(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run, calls = self._catalog_sandbox(tmp, remote_env=False)
+            run()
+            self.assertNotIn("syllabus_attach", calls.read_text(encoding="utf-8"))
+
     def test_cart_wrapper_dry_run_selects_only_cart(self) -> None:
         env = os.environ.copy()
         env.update({

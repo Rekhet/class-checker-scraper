@@ -26,6 +26,7 @@ import re
 import sys
 import tempfile
 import uuid
+import zlib
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
@@ -421,6 +422,36 @@ def _write_stamped(path: Path, obj: dict, field: str = "generated") -> int:
         if {**old, field: ""} == {**new, field: ""}:
             return path.stat().st_size
     return _write(path, {**obj, field: _now_iso()})
+
+
+def export_syllabus(conn, out_dir: Path) -> int:
+    """Write out_dir/syllabus/<year>_<term>.json for every local snapshot row.
+
+    Keys drop the subject-section code (`sbjt|lt|subh` -> `sbjt|lt`); two
+    keys that collapse to one raise instead of picking a winner. Classes in the
+    snapshot's `missing` list are left out, `{}` (no attachment) is kept."""
+    try:
+        rows = conn.execute("SELECT year, term, payload FROM syllabus_attach_snapshots"
+                            " ORDER BY year, term").fetchall()
+    except Exception as exc:  # table not pulled yet
+        if "no such table" in str(exc):
+            return 0
+        raise
+    for year, term, blob in rows:
+        snap = json.loads(zlib.decompress(blob).decode("utf-8"))
+        skip = set(snap.get("missing", []))
+        classes: dict = {}
+        for k in sorted(snap["classes"]):
+            if k in skip:
+                continue
+            short = "|".join(k.split("|")[:2])
+            if short in classes:
+                raise ValueError(f"syllabus {year} {term}: {short} has more than one subh")
+            classes[short] = snap["classes"][k]
+        _write_stamped(out_dir / "syllabus" / f"{year}_{term}.json",
+                       {"year": year, "term": term,
+                        "collected_at": snap["collected_at"], "classes": classes})
+    return len(rows)
 
 
 def select_term_codes(spec: str | None) -> list[str]:
@@ -901,6 +932,7 @@ def main(argv: list[str] | None = None) -> None:
             written = export_trend_only(conn, years=years, terms=terms,
                                         with_classes=args.current)
             print(f"wrote {written} term(s) under {OUT}")
+            print(f"wrote {export_syllabus(conn, OUT)} syllabus file(s) under {OUT / 'syllabus'}")
             return
 
         classes_dir = OUT / "classes"; trend_dir = OUT / "trend"   # class catalog + trend live in subdirs
@@ -941,6 +973,7 @@ def main(argv: list[str] | None = None) -> None:
         _export_explore(conn, terms,
                         lambda obj: _write_stamped(OUT / "explore-index.json", obj))
         _write_stamped(classes_dir / "rooms-index.json", rooms.build_rooms_index(conn))
+        print(f"wrote {export_syllabus(conn, OUT)} syllabus file(s) under {OUT / 'syllabus'}")
     finally:
         conn.close()
 
