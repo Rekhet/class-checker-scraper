@@ -62,3 +62,4 @@ __pycache__/
 /backups/*.db
 /backups/*.db-*
 /backups/*.sqlite*
+.tmp/
