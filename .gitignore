@@ -62,3 +62,6 @@ __pycache__/
 /backups/*.db-*
 /backups/*.sqlite*
 .tmp/
+
+# Cloudflare wrangler local state (dev sqlite, request metadata cache).
+.wrangler/
