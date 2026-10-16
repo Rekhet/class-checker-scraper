@@ -1,7 +1,5 @@
 # Rooms Page Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Add a `강의실` tab to the site: an empty-room finder (`#rooms`) and a per-room weekly schedule (`#room/<name>`), on the per-meeting rooms already exported in `slots[].room`.
 
 **Architecture:** The scraper gains one room-name normalizer (`scraper/rooms.py`) and writes `web/data/classes/rooms-index.json` (every room seen since 2020, with its last term) on each full export. The browser normalizes the selected term's `slots[].room` with a JavaScript twin of the normalizer (both checked against one fixture), computes occupancy itself, and paints the weekly grid with the timetable's grid painter, extracted from `renderTTNow` into a shared function.

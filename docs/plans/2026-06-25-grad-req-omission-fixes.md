@@ -1,7 +1,5 @@
 # 졸업요건 cross-dept recognition — omission fixes Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. **NO git commits** — working-tree only (project is not a git repo).
-
 **Goal:** Encode confirmed cross-department 전공선택 recognition rules for 5 majors that currently have no `external_recognition` block and therefore under-count 전선 credit.
 
 **Architecture:** Extend the existing OR-matcher `isRecog` in `app.js` `_gradAuditBlock` with one new mechanism — `any_dept: true` (recognize any *other* department's 전선/전필, capped by `track.recog_max`). Then add a data-only `external_recognition` block + per-track `recog_max` to 12 spec JSON files. socwelf is college-scoped (fits existing `colleges` mechanism, no wildcard needed); geoedu2/psir/comm/socio use the new `any_dept` wildcard.

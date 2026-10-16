@@ -1,7 +1,5 @@
 # Cross-Semester Explore (Core) — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Add a **강의탐색 (Explore)** tab right of 시간표 that fuzzy-searches classes across all terms and drills into a per-`sbjt_cd` code page showing that code's full offering history, newest-first, each row annotated with professor + semester.
 
 **Architecture:** A new build artifact `web/data/explore-index.json` (string-interned tables + integer-coded offering rows grouped by `sbjt_cd`) is emitted by `scraper/export_json.py`. A new client module in `web/app.js` lazy-loads it once, fuzzy-searches over per-code strings, and renders a code detail sub-view. A new partial `web/partials/explore.html` hosts both sub-views (search + detail); the hash router is extended to parse `route/param` so `#code/<sbjt_cd>` deep-links resolve to the detail view while nav highlighting stays on the Explore tab.

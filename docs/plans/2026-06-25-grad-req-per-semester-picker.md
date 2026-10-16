@@ -1,7 +1,5 @@
 # 졸업요건 per-semester timetable picker — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Replace the graduation-requirements flat multi-sheet picker with a per-semester picker where the user adds semesters and chooses exactly one timetable per semester, auditing the union of those picks.
 
 **Architecture:** Change `_gradState`'s selection field from a flat `sheets: [ids]` array to a `picks: { [semKey]: sheetId }` map, migrate old state to blank, derive the audit id list from the map, and rebuild `_renderGradSheets` as an add-a-row UI (per-semester rows + a `+ 학기 추가` dropdown). All in `web/app.js`; row styling in `web/styles.css`. The audit pipeline (`_gradTaken`, `renderGrad`, `partials/grad.html`) is untouched.

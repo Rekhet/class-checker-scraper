@@ -1,7 +1,5 @@
 # Semester Toggle Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Add a page-level semester toggle that scopes which timetables are shown, and warn (via `confirm()`) when a class from a different semester is added to the active timetable.
 
 **Architecture:** Extend the existing `meta` object (persisted at `snu_sheets_v2`) with `cur` (current semester `"year|term"`) and `sems` (per-sheet semester). The tab bar renders only sheets whose `sems[id] === cur`. A `<select>` in the tab row switches semester, syncing the search `#year/#term` selects. Empty semester groups and deleting all sheets are allowed (`meta.active === -1` → `timetable = []`). The add path `addToTT` auto-creates a sheet when the group is empty and confirms on semester mismatch.

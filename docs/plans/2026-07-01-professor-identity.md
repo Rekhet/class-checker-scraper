@@ -1,7 +1,5 @@
 # Professor Identity — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Give every professor a stable, re-export-safe identity so Explore can return professors as a search result type and render a `#prof/<id>` page listing every class they held (co-taught classes included), newest-first, each row linking to its `#code/<sbjt_cd>`.
 
 **Architecture:** The build (`scraper/export_json.py`, extending Spec 1's `_export_explore`) replaces the raw-professor-string table with a **professor-identity table** `profs: [{id, name, depts}]`. Identity is a **deterministic** `uuid5(PROF_NS, "<normalized-name>|<department>")` (never random), then a curated `scraper/prof_identity.json` (merges/splits) is applied on top so human corrections survive every rebuild. Co-professors are captured (multi) and each offering row's position 2 becomes an array of profIds. The client builds a `Map(profId → [offering refs])` reverse index once on load; professor search indexes the `profs[]` table, and the professor page resolves offerings by **membership** (position-2 is-or-contains the profId). A **dev-only** management panel (`partials/dev.html` → `server.py` admin endpoints) writes `prof_identity.json`; the deployed static site ships no backend.

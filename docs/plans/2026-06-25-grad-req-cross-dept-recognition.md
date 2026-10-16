@@ -1,7 +1,5 @@
 # 졸업요건 cross-dept 전공선택 recognition rework + foldable list — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Replace the single coarse `external_recognition.depts` substring matcher with a 4-mechanism matcher (exact-code / code-prefix / college / legacy-dept), migrate econ·me·stat data to the correct mechanism, and add a foldable `<details>` field listing exactly which courses counted as 전공선택.
 
 **Architecture:** All audit logic lives in `_gradAuditBlock` (a top-level global function in `web/app.js`). The matcher is rewritten in place; recognition rules become per-major JSON in `web/data/grad_req/*.json`. The foldable reuses the new `recogRows` array. CSS goes in `web/styles.css`.
