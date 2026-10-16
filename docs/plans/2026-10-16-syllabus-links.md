@@ -349,7 +349,7 @@ above is fixed). **Size:** M
   `/kor/../x` give 404.
 - [ ] `/kor/js/common.js` without upstream `Cache-Control` gets `public, max-age=86400`.
 - [ ] Upstream throws or times out → 502.
-- [ ] `node --test worker/syllabus-proxy/test/` passes.
+- [ ] `node --test worker/syllabus-proxy/test/index.test.js` passes.
 - [ ] Local live smoke: `npx wrangler@4.147.0 dev` (no account needed for local
   dev) plus Playwright Chromium opening
   `http://127.0.0.1:8787/sugang/cc/cc103.action?...` with Referer
@@ -359,7 +359,7 @@ above is fixed). **Size:** M
 
 ### Checkpoint: after Tasks 4–7
 
-- [ ] `uv run pytest -q tests` and `uv run pytest -q web/tests` pass, and so does `node --test worker/syllabus-proxy/test/`.
+- [ ] `uv run pytest -q tests` and `uv run pytest -q web/tests` pass, and so does `node --test worker/syllabus-proxy/test/index.test.js`.
 - [ ] Final review (opus) of the full diff of both repositories.
 
 ### Task 8: Rollout (each step asks the owner first)

@@ -4,7 +4,24 @@
 
 Design approved section by section by the owner on 2026-10-16 (flow, screen and
 Worker, error handling, tests). Decisions: governance log `class-checker`
-D-000003 … D-000023. Not implemented yet.
+D-000003 … D-000023.
+
+Implemented 2026-10-17 on branch `feat/syllabus-links` (scraper worktree) and
+web branch `feat/syllabus-links`; not deployed yet. Plan:
+`docs/plans/2026-10-16-syllabus-links.md`. Changed after approval by the owner
+during review (the sections below already include them):
+
+- D-000032 — a target term with no cloud row is stale at once.
+- D-000034 and D-000040 — the Worker answers an upstream 3xx, and a 4xx/5xx of
+  the page itself, with a Korean notice.
+- D-000035 — the drawer retries a failed term file on the next open.
+- D-000037 — early abort, a 60 s wait, then one restart.
+- D-000038 — failed classes carry their previous entry; `--force` bypasses the
+  shrink guard.
+- D-000039 — the group is replaced in place; the HTTP session is reused.
+- D-000043 — a broken term file is skipped, not the whole export.
+
+The Worker's static-path whitelist was a review-defect fix.
 
 ## Goal
 
@@ -113,15 +130,19 @@ Status texts:
 - `-` — collected, no attachment in that language.
 - `미수집` — the term has no file, or the class has no key.
 - `불러오는 중` — the term file is being fetched.
-- `불러오지 못함` — the fetch failed.
+- `불러오지 못함` — the fetch failed. The next opening of a class of that term
+  fetches again (D-000035).
 
-The look follows the drawer's existing key/value grid.
+The look follows the drawer's existing key/value grid. When the term file
+arrives, only the group is replaced, so focus and scroll stay (D-000039).
 
 ### Worker (S3)
 
 - A Cloudflare Worker on `workers.dev`, modeled on `snutt-proxy`. It relays only:
   - `GET`/`POST /sugang/cc/cc1NN(ajax)?.action`
-  - `GET /kor/*` and `GET /adm/*` (static files, `..` segments refused)
+  - `GET /kor/*` and `GET /adm/*`. Static paths must match
+    `^/(kor|adm)(/[A-Za-z0-9_.-]+)+$`. That refuses any `%`, backslash, empty
+    segment or `..`; every static path sugang's page loads fits.
 - Requests must carry a Referer whose origin is `https://rekhet.github.io` or
   the Worker's own origin (needed for the relayed page's own subrequests).
   Anything else gets 403. The allow-list is a Worker variable, so an app can be
@@ -135,19 +156,35 @@ The look follows the drawer's existing key/value grid.
 
 ### Error handling
 
-- **Class fetch** — retry once. If more than 2% of a term's classes still fail,
-  that term is not pushed and the run fails (GitHub mails the owner). At or below
-  2%, the term is pushed and those classes go to `missing`. Counts and the list
-  are printed (global R-000009).
+- **Class fetch** — each class is retried once.
+  - As soon as failures pass 2% of the roster, the pass stops. After about 60 s
+    the whole term is collected once more.
+  - If the second pass also passes 2%, the term is not pushed and the run fails
+    (GitHub mails the owner). Other terms still run (D-000037).
+  - Classes that fail within 2% carry their entry from the previous snapshot.
+    Only classes absent from it go to `missing` (D-000038).
+  - Counts and the list are printed (global R-000009).
 - **Shrink guard** — a snapshot with fewer than 90% of the previous snapshot's
-  classes is refused (`MIN_KEEP`, same as `catalog_snapshot`).
-- **Pull staleness** — exit 3 when the newest `checked_at` of a target term is
-  older than 48 h; `update.sh` raises the existing ops alert. Exit 4 means rows
-  changed and the syllabus files must be re-exported; 0 means nothing changed.
-  Any pull failure still publishes, as the other pulls do.
-- **Worker** — sugang error or timeout → 502; disallowed Referer → 403;
-  quota exhausted → Cloudflare 1027 (fail closed). The page itself does not
-  depend on the Worker: only the 원본 link breaks.
+  classes is refused (`MIN_KEEP`, same as `catalog_snapshot`). A manual
+  `--force` run bypasses it (D-000038).
+- **Pull staleness** — exit 3 when a target term's `checked_at` is older than
+  48 h, or when it has no cloud row at all (D-000032, reported separately).
+  `update.sh` raises the existing ops alert. Exit 4 means rows changed; 0 means
+  nothing changed. Any pull failure still publishes, as the other pulls do.
+- **Export** — a term whose file cannot be built (key collision, broken
+  payload) keeps its previous file and is reported. The rest of the export and
+  publish go on, and the run ends with exit 5 (D-000043).
+- **Worker**:
+  - an upstream 3xx on an action route, or a 4xx/5xx of the page itself
+    (non-ajax action), gets 502 with a Korean notice and a link to sugang
+    (D-000034, D-000040);
+  - an ajax or static error passes through;
+  - a static 3xx gets a plain 502;
+  - timeout → 502;
+  - disallowed Referer → 403;
+  - quota exhausted → Cloudflare 1027 (fail closed).
+
+  The page itself does not depend on the Worker: only the 원본 link breaks.
 - 2% and 48 h are assumptions without data, to be tuned in operation.
 
 ## Tech stack
@@ -162,7 +199,8 @@ The look follows the drawer's existing key/value grid.
 
 - `uv run pytest -q tests` — scraper.
 - `uv run pytest -q web/tests` — web, Playwright Chromium.
-- `node --test worker/syllabus-proxy/test/` — Worker.
+- `cd worker/syllabus-proxy && node --test` — Worker (a directory argument
+  fails on Node 24).
 - `python -m scraper.syllabus_attach collect [--past] [--force] [--dry-run]`
 - `python -m scraper.syllabus_attach pull --dest data/turso.db`
 - `python -m scraper.syllabus_attach init-remote`
