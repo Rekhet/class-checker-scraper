@@ -32,6 +32,20 @@ CATALOG_SNAPSHOTS_DDL = """CREATE TABLE IF NOT EXISTS catalog_snapshots (
     PRIMARY KEY (year, term)
 );"""
 
+# Syllabus attachment links, one row per term (scraper/syllabus_attach.py).
+# Same cloud/local split as catalog_snapshots; timestamps are +09:00 ISO.
+SYLLABUS_ATTACH_DDL = """CREATE TABLE IF NOT EXISTS syllabus_attach_snapshots (
+    year         TEXT NOT NULL,
+    term         TEXT NOT NULL,
+    digest       TEXT NOT NULL,     -- sha256 of the payload JSON without collected_at
+    classes      INTEGER NOT NULL,  -- classes whose syllabus was read
+    missing      INTEGER NOT NULL,  -- classes that failed after one retry
+    collected_at TEXT NOT NULL,     -- when this content was first seen
+    checked_at   TEXT NOT NULL,     -- last run that read the term
+    payload      BLOB NOT NULL,     -- zlib(JSON: year, term, collected_at, classes, missing)
+    PRIMARY KEY (year, term)
+);"""
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS terms (
     term   TEXT NOT NULL,            -- 20-char cmmnCd (year-independent code!)
@@ -82,6 +96,8 @@ CREATE TABLE IF NOT EXISTS class_slots (
 );
 
 """ + CATALOG_SNAPSHOTS_DDL + """
+
+""" + SYLLABUS_ATTACH_DDL + """
 
 CREATE TABLE IF NOT EXISTS crawl_runs (
     id          INTEGER PRIMARY KEY,
