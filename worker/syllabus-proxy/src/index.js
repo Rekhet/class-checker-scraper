@@ -84,6 +84,11 @@ export async function handle(request, env, upstreamFetch = fetch) {
   if (up.status >= 300 && up.status < 400 && up.status !== 304) {
     return kind === "action" ? unavailablePage() : text(502, "upstream error");
   }
+  // The page itself failing gets the same notice (D-000040); ajax and statics
+  // keep sugang's own status so the page's scripts handle them as they do there.
+  if (up.status >= 400 && kind === "action" && !url.pathname.endsWith("ajax.action")) {
+    return unavailablePage();
+  }
 
   const out = new Response(up.body, up);
   out.headers.delete("Set-Cookie");

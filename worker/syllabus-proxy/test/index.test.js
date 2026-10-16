@@ -102,6 +102,20 @@ test("upstream 3xx on action routes -> 502 Korean HTML, no Location/Set-Cookie",
   }
 });
 
+test("upstream 4xx/5xx on the page -> 502 Korean HTML; ajax and statics pass through", async () => {
+  for (const status of [404, 500, 503]) {
+    const page = await handle(req(PAGE), ENV, fake(new Response("err", { status, headers: { "Set-Cookie": "a=b" } })));
+    assert.equal(page.status, 502, `page ${status}`);
+    assert.ok((await page.text()).includes(SENTENCE), `page ${status}`);
+    assert.equal(page.headers.get("Set-Cookie"), null);
+    for (const p of ["/sugang/cc/cc103ajax.action", "/kor/js/common.js"]) {
+      const res = await handle(req(p), ENV, fake(new Response("err", { status })));
+      assert.equal(res.status, status, `${p} ${status}`);
+      assert.equal(await res.text(), "err");
+    }
+  }
+});
+
 test("upstream 3xx on static route -> plain 502 upstream error", async () => {
   const r = new Response(null, { status: 302, headers: { Location: "/" } });
   const res = await handle(req("/kor/js/common.js"), ENV, fake(r));
