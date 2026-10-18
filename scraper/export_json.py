@@ -486,6 +486,25 @@ def select_term_codes(spec: str | None) -> list[str]:
     return out
 
 
+def current_term(env) -> tuple[str, str]:
+    """(year, term code) of the term being collected: YEAR/SEM, else
+    COUNT_YEAR/COUNT_SEM, as publish.sh resolves them."""
+    year = env.get("YEAR") or env.get("COUNT_YEAR") or ""
+    sem = env.get("SEM") or env.get("COUNT_SEM") or ""
+    code = TERM_CODES.get(sem.lower(), sem)
+    if not (len(year) == 4 and year.isdigit() and code in TERM_CODES.values()):
+        raise SystemExit("error: set YEAR/SEM or COUNT_YEAR/COUNT_SEM to the current term "
+                         f"(e.g. YEAR=2026 SEM=fall); got {year!r} {sem!r}")
+    return year, code
+
+
+def term_status(year: str, term: str, current: tuple[str, str]) -> str:
+    """past | current | upcoming. Term codes sort in calendar order
+    (spring < summer < fall < winter)."""
+    key = (str(year), str(term))
+    return "past" if key < current else "current" if key == current else "upcoming"
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -859,7 +878,8 @@ def _export_explore(conn, terms, classes_dir_writer) -> None:
 
 def export_trend_only(conn, *, years: list[str] | None = None,
                       terms: list[str] | None = None,
-                      with_classes: bool = False) -> int:
+                      with_classes: bool = False,
+                      current: tuple[str, str] | None = None) -> int:
     """Publish only trend JSON for the requested scope.
 
     Counts-only runs do not need to rewrite the 60+ MB class catalog or the
@@ -870,6 +890,9 @@ def export_trend_only(conn, *, years: list[str] | None = None,
     files and their index counts: what a scheduled publish without a crawl
     changes (the counts overlay). Past terms and the explore index only change
     with a catalog crawl, which runs the full export instead.
+
+    With ``current`` (the collected term), every index entry's ``status`` is
+    recomputed, so a term rollover shows on the next scheduled publish.
     """
     classes_dir = OUT / "classes"
     trend_dir = OUT / "trend"
@@ -914,6 +937,9 @@ def export_trend_only(conn, *, years: list[str] | None = None,
         written += 1
         print(f"  {tfn}: {len(trend['series'])} classes × {len(trend['t'])} passes"
               f" (+{entry['trendArchives']} archive windows)")
+    if current is not None:
+        for entry in index.get("terms", []):
+            entry["status"] = term_status(entry["year"], entry["term"], current)
     _write(index_path, index)
     return written
 
@@ -936,6 +962,7 @@ def main(argv: list[str] | None = None) -> int:
     """0, or SYLLABUS_SKIPPED_EXIT when a syllabus term was skipped (everything
     else is still written)."""
     args = build_arg_parser().parse_args(argv)
+    current = current_term(os.environ)   # before anything is written
     conn = db.connect()
     skipped: list[str] = []
     try:
@@ -946,7 +973,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.current and not (years and terms):
                 raise SystemExit("--current needs --years and --terms (the collected term)")
             written = export_trend_only(conn, years=years, terms=terms,
-                                        with_classes=args.current)
+                                        with_classes=args.current, current=current)
             print(f"wrote {written} term(s) under {OUT}")
             print(f"wrote {export_syllabus(conn, OUT, skipped)} syllabus file(s) "
                   f"under {OUT / 'syllabus'}")
@@ -963,7 +990,8 @@ def main(argv: list[str] | None = None) -> int:
             fn = f"{t['year']}_{t['term']}.json"
             size = _write(classes_dir / fn, rows)
             entry = {"year": t["year"], "term": t["term"],
-                     "label": t["label"], "count": len(rows), "file": fn}   # client prefixes data/classes/
+                     "label": t["label"], "count": len(rows), "file": fn,   # client prefixes data/classes/
+                     "status": term_status(t["year"], t["term"], current)}
             trend = export_trend(conn, t)   # None until the counts timer has run
             if trend:
                 tfn = f"trend_{t['year']}_{t['term']}.json"

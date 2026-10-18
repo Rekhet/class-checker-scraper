@@ -94,6 +94,7 @@ class ExportSyllabusTest(unittest.TestCase):
     def test_main_exits_5_after_writing_everything_else_when_a_term_was_skipped(self) -> None:
         conn = _conn({"A001|001|000": {}, "A001|001|001": {}}, [])
         with tempfile.TemporaryDirectory() as tmp, \
+             patch.dict(ej.os.environ, {"YEAR": "2026", "SEM": "fall"}), \
              patch.object(ej.db, "connect", return_value=conn), \
              patch.object(ej, "OUT", Path(tmp)), \
              patch.object(ej, "export_trend_only", return_value=1) as trend, \
@@ -106,6 +107,7 @@ class ExportSyllabusTest(unittest.TestCase):
     def test_main_returns_0_when_nothing_was_skipped(self) -> None:
         conn = _conn(CLASSES, [])
         with tempfile.TemporaryDirectory() as tmp, \
+             patch.dict(ej.os.environ, {"YEAR": "2026", "SEM": "fall"}), \
              patch.object(ej.db, "connect", return_value=conn), \
              patch.object(ej, "OUT", Path(tmp)), \
              patch.object(ej, "export_trend_only", return_value=1):
