@@ -140,7 +140,7 @@ if [ -f "$ROOT/turso-remote.env" ]; then
   esac
 fi
 
-# Syllabus attachment links: the collect-syllabus runner (daily 04:40 KST)
+# Syllabus attachment links: the collect-syllabus runner (daily 01:40 KST)
 # writes one row per term to the cloud table syllabus_attach_snapshots; this
 # run copies changed rows into the local file (scraper/syllabus_attach.py pull)
 # and the export below turns them into web/data/syllabus/. Exit 0 = nothing

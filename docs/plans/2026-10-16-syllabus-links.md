@@ -267,7 +267,7 @@ def parse_attach(resp: dict) -> dict:
 
 **Workflow content:**
 - Copy the `collect-catalog.yml` structure, without the Playwright steps.
-- `on: schedule: cron "40 19 * * *"` plus `workflow_dispatch` with input `past`
+- `on: schedule: cron "40 19 * * *"` (01:40 KST `"40 16 * * *"` since D-000060) plus `workflow_dispatch` with input `past`
   (boolean, default false).
 - `concurrency: collect-syllabus`, one job, `timeout-minutes: 360` (the
   `--past` run is about 2.8 h; a daily run is about 21 min). Measured in

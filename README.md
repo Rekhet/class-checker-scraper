@@ -26,7 +26,7 @@ The audit is read-only. A stored `NULL` is expected outside a cart window; with
 `--live`, the report distinguishes site-side NULLs from live non-negative values
 that should have been stored.
 
-The `collect-syllabus` workflow (daily 04:40 KST) stores syllabus attachment links per term in the cloud; `scripts/update.sh` pulls them and publishes `data/syllabus/`.
+The `collect-syllabus` workflow (daily 01:40 KST) stores syllabus attachment links per term in the cloud; `scripts/update.sh` pulls them and publishes `data/syllabus/`.
 
 ## Configuration
 

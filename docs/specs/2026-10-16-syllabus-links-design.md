@@ -62,8 +62,8 @@ We do not rebuild the syllabus page itself.
 
 ### Flow (S1)
 
-1. **Collect** — GitHub Actions `collect-syllabus.yml`, daily at 04:40 KST
-   (cron `40 19 * * *`, plus `workflow_dispatch`), runs
+1. **Collect** — GitHub Actions `collect-syllabus.yml`, daily at 01:40 KST
+   (cron `40 16 * * *`, plus `workflow_dispatch`; was 04:40 until D-000060), runs
    `python -m scraper.syllabus_attach collect`.
    - Terms: the current term (`COUNT_YEAR`/`COUNT_SEM`) and `UPCOMING_TERMS`,
      read from `collect.env` as `catalog_snapshot` does (`parse_terms`).

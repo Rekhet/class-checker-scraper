@@ -8,7 +8,8 @@
 # 18:00 KST) pulls changed terms and publishes web/data/syllabus/; it does
 # not read sugang for this.
 #
-# Runs daily at 04:40 KST (about 21 min). GitHub cron is best-effort; the
+# Runs daily at 01:40 KST (about 66 min; GitHub started the first scheduled run
+# 2 h late, so this leaves room before the 06:00 update). GitHub cron is best-effort; the
 # local pull reports a target term not refreshed for 48 h, which also covers
 # GitHub disabling the schedule after 60 days without repository activity.
 #
@@ -20,7 +21,7 @@ name: collect-syllabus
 
 on:
   schedule:
-    - cron: "40 19 * * *"
+    - cron: "40 16 * * *"
   workflow_dispatch:
     inputs:
       past:
