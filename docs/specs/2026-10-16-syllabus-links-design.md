@@ -23,6 +23,13 @@ during review (the sections below already include them):
 
 The Worker's static-path whitelist was a review-defect fix.
 
+Rollout so far (2026-10-17 … 18): table created, first collection (3 terms,
+missing 0), past terms in two runs (26 terms, 4 classes missing: sugang
+answers them with an empty body, shown as 미수집, D-000050), web drawer
+published. The Worker is not deployed yet (D-000053). Measured: ~195
+classes/min, a daily run ~66 min. D-000047 replaced the `--dry-run --past`
+check with a roster-only comparison (no sugang requests).
+
 ## Goal
 
 A class's detail drawer gets a 강의계획서 group with two independent fields:
@@ -75,7 +82,8 @@ We do not rebuild the syllabus page itself.
 5. **Web** — the first time a class of term T is opened in the drawer, the page
    fetches T's syllabus file once (cached in memory for the session).
 6. **Past terms** — the same command with `--past`, run once through
-   `workflow_dispatch`, covering 2020 … 2026-1 (~101,500 classes, about 2.8 h).
+   `workflow_dispatch`, covering 2020 … 2026-1 (~101,500 classes, about 8.7 h
+   measured, so two runs under the 6 h timeout; D-000047).
    Each term is pushed when it completes, so a cut-off run resumes at the next
    term on rerun (`--past` skips terms that already have a snapshot unless
    `--force`).

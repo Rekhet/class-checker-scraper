@@ -270,7 +270,8 @@ def parse_attach(resp: dict) -> dict:
 - `on: schedule: cron "40 19 * * *"` plus `workflow_dispatch` with input `past`
   (boolean, default false).
 - `concurrency: collect-syllabus`, one job, `timeout-minutes: 360` (the
-  `--past` run is about 2.8 h; a daily run is about 21 min).
+  `--past` run is about 2.8 h; a daily run is about 21 min). Measured in
+  rollout: `--past` about 8.7 h (two runs), a daily run about 66 min (D-000047).
 - Run: `set -a; . ./collect.env; set +a; uv run python -m scraper.syllabus_attach collect ${{ inputs.past && '--past' || '' }}`
 - Secrets: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`.
 
@@ -370,7 +371,9 @@ above is fixed). **Size:** M
 3. `workflow_dispatch` collect-syllabus (targets). Check the run log: per-term
    counts and missing ≤ 2%.
 4. `--dry-run --past` locally: compare per-term roster counts with local
-   `classes`. Then `workflow_dispatch` with `past=true`.
+   `classes`. Then `workflow_dispatch` with `past=true`. (Done instead as a
+   roster-only comparison without sugang requests, then two `past=true`
+   runs: `--dry-run` fetches every class, D-000047.)
 5. Local `update.sh`, or the pull + export by hand: `web/data/syllabus/*.json`
    appear. Merge the web branch, approve, publish.
 6. The owner creates the Cloudflare account and runs `npx wrangler@4.147.0 login`;

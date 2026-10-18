@@ -13,7 +13,8 @@
 # GitHub disabling the schedule after 60 days without repository activity.
 #
 # Manual runs: `past` collects the past terms (2020 on) that have no row yet,
-# instead of the targets (about 2.8 h, once); `force` bypasses the 90% shrink
+# instead of the targets (about 8.7 h, so two runs under the 6 h timeout; each
+# rerun skips stored terms); `force` bypasses the 90% shrink
 # guard and, with `past`, also re-collects terms that already have a row.
 name: collect-syllabus
 
@@ -23,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       past:
-        description: "Collect past terms without a row instead of the targets (about 2.8 h)"
+        description: "Collect past terms without a row instead of the targets (about 8.7 h: rerun once after the 6 h timeout)"
         type: boolean
         default: false
       force:
