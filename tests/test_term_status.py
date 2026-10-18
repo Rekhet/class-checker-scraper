@@ -28,22 +28,21 @@ WANT = {("2027", SPRING): "upcoming", ("2026", SPRING): "past", ("2026", SUMMER)
 
 
 class CurrentTermTest(unittest.TestCase):
-    def test_year_sem_win_over_count_year_sem(self) -> None:
-        env = {"YEAR": "2026", "SEM": "fall", "COUNT_YEAR": "2025", "COUNT_SEM": "spring"}
+    def test_counted_term_wins_over_a_re_crawled_year_sem(self) -> None:
+        env = {"YEAR": "2025", "SEM": "spring", "COUNT_YEAR": "2026", "COUNT_SEM": "fall"}
         self.assertEqual(ej.current_term(env), ("2026", FALL))
 
-    def test_falls_back_to_count_year_sem_and_takes_codes(self) -> None:
-        self.assertEqual(ej.current_term({"COUNT_YEAR": "2026", "COUNT_SEM": WINTER}),
-                         ("2026", WINTER))
-        self.assertEqual(ej.current_term({"YEAR": "", "SEM": "", "COUNT_YEAR": "2026",
-                                          "COUNT_SEM": "Summer"}), ("2026", SUMMER))
+    def test_falls_back_to_year_sem_and_takes_codes(self) -> None:
+        self.assertEqual(ej.current_term({"YEAR": "2026", "SEM": WINTER}), ("2026", WINTER))
+        self.assertEqual(ej.current_term({"COUNT_YEAR": "", "COUNT_SEM": "", "YEAR": "2026",
+                                          "SEM": "Summer"}), ("2026", SUMMER))
 
     def test_missing_or_bad_values_stop(self) -> None:
         for env in ({}, {"YEAR": "2026"}, {"SEM": "fall"}, {"YEAR": "26", "SEM": "fall"},
                     {"YEAR": "2026", "SEM": "autumn"}):
             with self.subTest(env=env), self.assertRaises(SystemExit) as cm:
                 ej.current_term(env)
-            self.assertIn("YEAR/SEM or COUNT_YEAR/COUNT_SEM", str(cm.exception))
+            self.assertIn("COUNT_YEAR/COUNT_SEM (collect.env) or YEAR/SEM", str(cm.exception))
 
 
 class TermStatusTest(unittest.TestCase):
@@ -60,7 +59,7 @@ class IndexStatusTest(unittest.TestCase):
 
     def test_full_export_marks_every_term(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, \
-             patch.dict(ej.os.environ, {"YEAR": "2026", "SEM": "fall"}), \
+             patch.dict(ej.os.environ, {"COUNT_YEAR": "2026", "COUNT_SEM": "fall"}), \
              patch.object(ej, "OUT", Path(tmp)), \
              patch.object(ej.db, "connect"), \
              patch.object(ej.db, "list_terms", return_value=TERMS), \
@@ -79,7 +78,7 @@ class IndexStatusTest(unittest.TestCase):
     def test_current_export_recomputes_every_entry(self) -> None:
         stale = [{**t, "count": 0, "file": "x.json", "status": "upcoming"} for t in TERMS]
         with tempfile.TemporaryDirectory() as tmp, \
-             patch.dict(ej.os.environ, {"YEAR": "2026", "SEM": "fall"}), \
+             patch.dict(ej.os.environ, {"COUNT_YEAR": "2026", "COUNT_SEM": "fall"}), \
              patch.object(ej, "OUT", Path(tmp)), \
              patch.object(ej.db, "connect"), \
              patch.object(ej.db, "list_terms", return_value=[]), \

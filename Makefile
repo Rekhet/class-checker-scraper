@@ -62,10 +62,10 @@ serve-prod:      ## local preview of the EXACT prod page: index.html + web/data/
 	@./serve.sh --static
 
 export-json:     ## dump local catalog -> web/data/classes/ + trend/ (per term + index)
-	@.venv/bin/python scraper/export_json.py
+	@set -a; [ ! -f ./collect.env ] || . ./collect.env; set +a; .venv/bin/python scraper/export_json.py
 
 export-json-remote: ## dump REMOTE catalog -> web/data/classes/ + trend/ (read-only token)
-	@set -a; . ./prod.env; set +a; .venv/bin/python scraper/export_json.py
+	@set -a; [ ! -f ./collect.env ] || . ./collect.env; . ./prod.env; set +a; .venv/bin/python scraper/export_json.py
 
 # ---- update ----
 update: ## run update script DB

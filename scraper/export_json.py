@@ -6,10 +6,14 @@ the remote read-only DB with prod.env). Output = web/data/classes/<year>_<term>.
 (one per term) + web/data/classes/index.json (term list + filter vocabularies); enrollment
 trend goes to web/data/trend/<year>_<term>.json. The frontend lazy-loads per term.
 
-    # local backend:
-    python scraper/export_json.py
+    # local backend (make export-json reads collect.env for the current term):
+    YEAR=2026 SEM=fall python scraper/export_json.py
     # remote (read-only) Turso:
-    set -a; . ./prod.env; set +a; python scraper/export_json.py
+    set -a; . ./collect.env; . ./prod.env; set +a; python scraper/export_json.py
+
+Each index.json term gets a ``status`` (past|current|upcoming) against the
+counted term, COUNT_YEAR/COUNT_SEM (else YEAR/SEM); without one the export
+stops before writing anything.
 
 Writes under web/data/ by default (override the base with JSON_OUT=...): the class
 catalog -> web/data/classes/, enrollment trend -> web/data/trend/. Use
@@ -487,14 +491,15 @@ def select_term_codes(spec: str | None) -> list[str]:
 
 
 def current_term(env) -> tuple[str, str]:
-    """(year, term code) of the term being collected: YEAR/SEM, else
-    COUNT_YEAR/COUNT_SEM, as publish.sh resolves them."""
-    year = env.get("YEAR") or env.get("COUNT_YEAR") or ""
-    sem = env.get("SEM") or env.get("COUNT_SEM") or ""
+    """(year, term code) of the term being counted: COUNT_YEAR/COUNT_SEM from
+    collect.env, else YEAR/SEM. YEAR/SEM can name another term on a manual
+    re-crawl (UPDATE_YEAR/UPDATE_SEM), which must not move "current"."""
+    year = env.get("COUNT_YEAR") or env.get("YEAR") or ""
+    sem = env.get("COUNT_SEM") or env.get("SEM") or ""
     code = TERM_CODES.get(sem.lower(), sem)
     if not (len(year) == 4 and year.isdigit() and code in TERM_CODES.values()):
-        raise SystemExit("error: set YEAR/SEM or COUNT_YEAR/COUNT_SEM to the current term "
-                         f"(e.g. YEAR=2026 SEM=fall); got {year!r} {sem!r}")
+        raise SystemExit("error: set COUNT_YEAR/COUNT_SEM (collect.env) or YEAR/SEM to the "
+                         f"current term (e.g. YEAR=2026 SEM=fall); got {year!r} {sem!r}")
     return year, code
 
 
