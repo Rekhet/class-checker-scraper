@@ -169,14 +169,14 @@ the cloud boundary, so without a crawl the current term's catalog is frozen: new
 and 평가방식 stay as the last crawl left them, and a class missing from the
 cloud roster is never counted there. Run `UPDATE_CRAWL=1 ./scripts/update.sh`
 after a timetable change. If the roster itself changed, re-seed the collector's
-cloud catalog too (this refills terms/classes/class_slots/crawl_runs and leaves
-`count_samples` untouched; the cloud `class_slots` already has the per-meeting
-`room` column since 2026-10-08, so its `init_schema` no longer rebuilds it). `scraper.reseed_roster` does not migrate the cloud: it sends one
-room-less row per meeting time.
+cloud roster for that term only. `scraper.reseed_roster` replaces that term's
+classes and sends one distinct room-less row per meeting time. It does not
+initialize the remote schema or change `count_samples`, `count_passes`, or
+`count_latest`. Do not use the all-table migration script for a rollover.
 
 ```sh
 set -a; . ./turso-remote.env; set +a
-.venv/bin/python scraper/migrate_to_turso.py --src data/turso.db
+.venv/bin/python -m scraper.reseed_roster --year <year> --semester <sem> --src data/turso.db
 ```
 
 `make migrate-remote` targets the separate production database in
@@ -229,8 +229,8 @@ a counts run with `active=false` only verifies the window gate.
 sugang lists a coming term's catalog and 평가방식 weeks before its timetable,
 rooms, or counts (sampled 2026-10-08: 2026 겨울 212 classes, 2027 1학기 3,952;
 수업교시, 수업형태, and 강의실 empty in both the Excel and the search, every
-count 0). `UPCOMING_TERMS` in `collect.env` (`"2026:winter 2027:spring"` since
-2026-10-08) lists those terms; the term equal to `COUNT_YEAR`/`COUNT_SEM` is
+count 0). `UPCOMING_TERMS` in `collect.env` (`"2027:spring"` since the
+2026-11-01 winter rollover) lists future terms; the term equal to `COUNT_YEAR`/`COUNT_SEM` is
 skipped on both sides. They are collected remotely and only deployed here:
 
 - **Runner:** `.github/workflows/collect-catalog.yml` (05:20, 11:20, 17:20
@@ -261,6 +261,18 @@ remove it; its leftover cloud snapshot is then ignored.
 `scraper/crawl.py --min-keep RATIO` (also `refresh.sh --min-keep`) applies the
 same shrink guard to a local catalog rebuild.
 
+## Active winter scope (2026-11-01)
+
+`collect.env` now selects 2026 winter (`COUNT_MODE=enrollment`); only
+2027 spring remains in `UPCOMING_TERMS`. Registration windows are October
+27–30 and November 2–3 (weekends excluded), changes November 11–13,
+and cancellation December 11–January 7, 2027. The past October 20–23
+preliminary window does not arm a new cart timer. Existing fall samples remain.
+Local winter refresh, cloud roster seeding, deployment and verification
+status: `docs/plans/2026-11-01-winter-rollover.md`. Sunday November 1 is
+outside the window; actual remote counts verification is pending November 2.
+The update timer remains 06:00/12:00/18:00 KST, merge and publish only.
+
 ## Semester rollover
 
 Nothing below happens on its own. In order:
@@ -271,8 +283,9 @@ Nothing below happens on its own. In order:
    and the GitHub collector read them from there.
 2. Crawl the new term's catalog locally:
    `UPDATE_CRAWL=1 UPDATE_YEAR=<year> UPDATE_SEM=<sem> ./scripts/update.sh`.
-3. Re-seed the collector's cloud roster from the local catalog (the command
-   above). Until this is done every runner pass fails with "cloud roster ...
+3. Re-seed only the new term with `python -m scraper.reseed_roster --year <year>
+   --semester <sem> --src data/turso.db` under the cloud credentials above.
+   Until this is done every runner pass fails with "cloud roster ...
    is empty" — by design, instead of recording empty passes.
 4. If a cart window is configured, arm the bounded cart units (below); cart is
    never collected on the GitHub runner.

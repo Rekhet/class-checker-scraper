@@ -55,12 +55,24 @@
        left them, and a class missing from the cloud roster is never counted
        there. Run <code>UPDATE_CRAWL=1 ./scripts/update.sh</code> after a
        timetable change, then re-seed the collector's cloud catalog with
-       <code>scraper/migrate_to_turso.py --src data/turso.db</code> under
+       <code>python -m scraper.reseed_roster --year &lt;year&gt; --semester &lt;sem&gt; --src data/turso.db</code> under
        <code>turso-remote.env</code> if the roster itself changed.</p></div>
+
+  <h2 id="winter-rollover">Winter collection scope (2026-11-01)</h2>
+  <p><code>collect.env</code> now targets 2026 winter. Registration dates are
+     October 27–30 and November 2–3, changes November 11–13, and cancellation
+     December 11–January 7, 2027. Sunday November 1 is excluded: a runner
+     skip is expected. Actual in-window remote collection remains pending
+     November 2. Deployment, roster and publication verification are tracked
+     in <code>docs/plans/2026-11-01-winter-rollover.md</code>.</p>
+  <p>Winter catalog facts now follow the current-term path: refresh locally
+     and reseed the cloud roster after catalog changes. The normal timer only
+     merges samples and publishes. Do not reintroduce winter into
+     <code>UPCOMING_TERMS</code> or delete the existing fall history.</p>
 
   <h2 id="upcoming">Upcoming terms (catalog before the timetable)</h2>
   <p>Terms in <code>collect.env</code> <code>UPCOMING_TERMS</code>
-     (<code>"2026:winter 2027:spring"</code> since 2026-10-08) are read on a
+     (<code>"2027:spring"</code> since the 2026-11-01 winter rollover) are read on a
      GitHub runner (<code>collect-catalog.yml</code>, 05:20/11:20/17:20 KST)
      into the cloud table <code>catalog_snapshots</code>, one row per term. The
      scheduled update only runs
