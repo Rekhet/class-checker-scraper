@@ -208,6 +208,18 @@ since the last crawl — live `375.803(042)` and `552.439(002)` missing from the
 catalog — was marked handled this way as the baseline, per the owner (no more
 catalog crawls this semester).
 
+## Collector runner compatibility
+
+The Chromium collectors (`collect-catalog.yml`, `collect-counts.yml`) pin
+`ubuntu-24.04`; browser cache keys include that image version and runner
+architecture. On 2026-11-01, Actions logs showed the last successful catalog
+pass on Ubuntu 24.04 (run `39961829655`, 2026-10-23 13:30 UTC), followed by
+Chromium installation failures on Ubuntu 26.04 from `ubuntu-latest`
+(run `40038226705`, 2026-10-23 23:11 UTC; repeated in `41292705554`).
+See `docs/plans/2026-11-01-collector-runner-os.md` for evidence and rollout.
+The pin needs a `main` push and a real collector pass before recovery can be
+confirmed. A counts run with `active=false` only verifies the window gate.
+
 ## Upcoming terms
 
 sugang lists a coming term's catalog and 평가방식 weeks before its timetable,
