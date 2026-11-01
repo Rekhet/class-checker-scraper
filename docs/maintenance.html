@@ -79,9 +79,12 @@
       <code>Playwright does not support chromium on ubuntu26.04-x64</code>
       was observed on 2026-11-01 after <code>ubuntu-latest</code> changed images.
       Both Chromium collectors now pin <code>ubuntu-24.04</code> and separate
-      browser caches by image version and architecture. Deploy the fix to
-      <code>main</code>, then verify an actual catalog pass and the cloud
-      <code>catalog_snapshots.checked_at</code>. A successful counts run with
+      browser caches by image version and architecture. Fix <code>4a1d350</code>
+      was deployed to <code>main</code> November 1; catalog run
+      <code>41293653161</code> succeeded and cloud
+      <code>catalog_snapshots.checked_at</code> advanced to 09:34 UTC.
+      The next normal local pull/publication (06:00 KST November 2) remains
+      unverified. A successful counts run with
       <code>active=false</code> did not run Chromium or collect samples.
       Evidence and pending verification:
       <code>docs/plans/2026-11-01-collector-runner-os.md</code>.</li>

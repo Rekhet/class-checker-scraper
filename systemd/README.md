@@ -217,8 +217,12 @@ pass on Ubuntu 24.04 (run `39961829655`, 2026-10-23 13:30 UTC), followed by
 Chromium installation failures on Ubuntu 26.04 from `ubuntu-latest`
 (run `40038226705`, 2026-10-23 23:11 UTC; repeated in `41292705554`).
 See `docs/plans/2026-11-01-collector-runner-os.md` for evidence and rollout.
-The pin needs a `main` push and a real collector pass before recovery can be
-confirmed. A counts run with `active=false` only verifies the window gate.
+Fix `4a1d350` reached `main` on 2026-11-01; catalog run `41293653161`
+succeeded on Ubuntu 24.04 and cloud `checked_at` advanced to 09:34 UTC.
+Winter recovered to 262 classes and spring to 4,972. The gap was about 212 h.
+Local pull/publication remains for the normal 06:00 KST November 2 update.
+Counts actual collection remains unverified outside its configured windows;
+a counts run with `active=false` only verifies the window gate.
 
 ## Upcoming terms
 

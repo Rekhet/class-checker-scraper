@@ -50,10 +50,71 @@ two Chromium collectors to the previously successful `ubuntu-24.04` image.
   and recorded the targeted test command. Incident prose check: no warnings.
   Existing README punctuation warnings are outside this change.
 - Configuration-only change; no new implementation-mirroring unit test.
-- Pending: push the fix to `main`; no deployment or manual dispatch authorized yet.
-- Pending: actual catalog runner pass, confirming Ubuntu 24.04, Chromium install,
-  successful term collection and refreshed cloud `catalog_snapshots.checked_at`.
-- Pending: an in-window counts pass and its cloud samples; off-season skips
-  cannot establish collector recovery. Do not force a window to manufacture evidence.
+- User approved deployment and actual collection on 2026-11-01
+  (`class-checker/D-000063`). Fix `4a1d350` was fast-forwarded to `main`
+  and pushed at 09:33 UTC. No force push or data deletion.
+- Push CI [41293617125](https://github.com/Rekhet/class-checker-scraper/actions/runs/41293617125): success.
+- Catalog [41293653161](https://github.com/Rekhet/class-checker-scraper/actions/runs/41293653161):
+  success, 46 s, image `ubuntu-24.04`, Chromium installation and both terms
+  collected. Cloud SELECT independently confirmed refreshed rows.
+- Cloud `checked_at` (UTC): winter `2026-11-01T09:34:05`, spring
+  `2026-11-01T09:34:12`. Both previously stopped at October 23, 13:31 UTC.
+- Counts actual collection remains unverified: the configured enrollment
+  window ended October 20. Cloud and local histories both end at
+  `2026-10-20T23:51:55` KST. Do not force a window to manufacture evidence.
+- Local catalog and public website have not been manually republished. At
+  inspection the local snapshots still held 260/4,929 classes. The next normal
+  `class-checker.update.timer` pass (06:00 KST November 2) must pull and publish
+  the recovered snapshots. `web/` was not changed in this repair.
 - Rollback: restore the preceding workflow configuration through a reviewed
   commit if the pin fails; do not remove failure guards or delete cloud data.
+
+## Data gap and recovery
+
+Read-only cloud queries were taken before and after the recovery pass; the
+compressed old payloads were preserved locally before dispatch. Local evidence
+(untracked, retain for audit): `.tmp/collector-recovery-before.json`,
+`.tmp/collector-before-*.zlib`, `.tmp/collector-recovery-after.json`,
+`.tmp/catalog-runs-recovery.json`, `.tmp/count-failures-recovery.json`.
+Snapshot
+records were compared by `(sbjt_cd, lt_no, subh_cd)`, with unique-key and
+before + additions - removals = after checks. These are endpoint differences,
+not counts of every event during the outage.
+
+| Term | Before | Recovered | Added | Removed | Existing records changed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2026 winter | 260 | 262 | 2 | 0 | 240 |
+| 2027 spring | 4,929 | 4,972 | 43 | 0 | 1 |
+
+- Consecutive failed catalog attempts after the last success: 22, from
+  October 23 23:11 UTC to November 1 09:20 UTC (Actions listing, 66 runs
+  examined). Last observation to recovery: 8 days 20:02:47 for winter and
+  8 days 20:02:46 for spring, approximately 212 hours.
+- All 45 currently present additions were recovered. There were no removals
+  between these two snapshots. This does not rule out transient removals
+  during the interval. Existing snapshot rows had remained in the cloud.
+- Winter's 240 changed existing records include volatile Excel values:
+  cart 236, applied 218; these overlap. Other changed fields: professor 2,
+  department 7, quota 11, quota_returning 11, room 4, slots 5. Spring's one
+  existing changed record has quota and quota_returning differences.
+- Grading maps differ for both terms; switchable maps differ for spring.
+  Map differences can include new classes and are not additional independent
+  counts of changed existing records.
+- The system keeps one current catalog snapshot per term. Exact change times
+  and intermediate states during the unobserved interval cannot be recovered
+  from those snapshots. The number of transient changes is unknown.
+- No counts samples were expected during this catalog outage: all configured
+  count windows ended by October 20, before the OS failure began October 23.
+  This finding concerns this outage, not completeness of all historical counts.
+- Separate October 16 counts outage: both cloud and local `count_passes` have
+  adjacent observations at 09:28:20 and 13:11:46 KST, a 3:43:26 gap. Actions
+  lists 22 failures at 09:30–13:00 KST; the first (`38829850120`) reports
+  HTTP 404 at `cc100InterfaceSrch.action`, while the last (`38848350691`)
+  reports a no-cookie redirect/session failure. The two boundary logs show
+  site access failures; they do not establish the site's underlying cause.
+  Missed intra-gap count changes and their times cannot be reconstructed
+  from later samples. Failure count is not a count of lost class rows because
+  counts are deltas. This historical site failure is separate from the fixed OS issue.
+- Syllabus target snapshots were refreshed November 1 at 05:55–06:18 KST
+  with `missing=0` for fall, winter, and spring. The October 30 failed term
+  was not uploaded; later successful runs recovered the latest attachment state.
