@@ -40,14 +40,20 @@ winter samples cannot be backfilled from current counts.
   all preseed cloud sample/pass/latest aggregates unchanged.
 - Local fall history counts also unchanged: 7,660 passes, 7,454,181 sample
   rows, 8,652 latest rows. No winter passes were synthesized on Sunday.
-- Collector deployment/runner gate and CI verification pending.
+- Collector main commit `b0d3cda` deployed. CI run `41299404573` succeeded
+  (310 tests, 59 subtests locally; same suite in Actions).
+- Actual runner `41299420016` used `b0d3cda`, succeeded with `active=false`
+  at November 1 10:53 UTC, as required for Sunday. This verifies deployment
+  and the gate, not a counts crawl. No artificial pass was inserted.
 - Independent review corrected operator instructions that still prescribed
   all-table migration. README/maintenance now require scoped term reseeding.
   Historical registration dates are described as configured windows, not samples.
 - Full export completed; web commit `56e205d` contains only generated winter
   classes, classes/index.json, rooms-index.json, and explore-index.json.
   Index verified: winter current/262, fall past, exactly one current term.
-  Web main push completed; public HTTP verification pending.
+  Web main push completed. Pages run `41299336419` succeeded; public HTTP
+  GETs confirmed winter current/262, fall past, and 262 winter class rows.
+  Verification artifact: `.tmp/winter-rollover-public-verification.json`.
 - Pending actual in-window runner pass/cloud samples on or after November 2.
 
 ## Operational boundaries
@@ -64,3 +70,17 @@ Failure handling: a crawl failure leaves the existing catalog or rolls back;
 failed roster seeding blocks collector deployment; collector failures remain
 loud. On Sunday, skip is expected and cannot prove actual collection success.
 After deployment the next real active pass must show coverage and write samples.
+
+## Handoff
+
+Applied commits: scraper `b0d3cda`, public data `56e205d`. Existing uncommitted
+UI work remains local. Dates are KST unless explicitly UTC. The next actual
+counts pass on an active date (November 2) must still be checked for coverage,
+cloud count_passes/count_samples, and local pull/publication. This pending
+check is not a claim that a future run has succeeded.
+
+Official-source comparison, real-config boundaries, local crawl output,
+cloud roster/history queries, full offline suite, deployment CI and public
+HTTP responses support the completed claims. Independent review corrected
+all-table reseed instructions and historical-observation wording. Prose check
+passed with no warnings. No further numerical estimates were used.

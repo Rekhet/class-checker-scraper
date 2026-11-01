@@ -175,8 +175,8 @@ initialize the remote schema or change `count_samples`, `count_passes`, or
 `count_latest`. Do not use the all-table migration script for a rollover.
 
 ```sh
-set -a; . ./turso-remote.env; set +a
-.venv/bin/python -m scraper.reseed_roster --year <year> --semester <sem> --src data/turso.db
+set -a; . ./collect.env; . ./turso-remote.env; set +a
+.venv/bin/python -m scraper.reseed_roster --year "$COUNT_YEAR" --semester "$COUNT_SEM" --src data/turso.db
 ```
 
 `make migrate-remote` targets the separate production database in
@@ -220,7 +220,8 @@ See `docs/plans/2026-11-01-collector-runner-os.md` for evidence and rollout.
 Fix `4a1d350` reached `main` on 2026-11-01; catalog run `41293653161`
 succeeded on Ubuntu 24.04 and cloud `checked_at` advanced to 09:34 UTC.
 Winter recovered to 262 classes and spring to 4,972. The gap was about 212 h.
-Local pull/publication remains for the normal 06:00 KST November 2 update.
+Winter was subsequently refreshed locally and published on November 1
+(262 classes); see the winter rollover plan below.
 Counts actual collection remains unverified outside its configured windows;
 a counts run with `active=false` only verifies the window gate.
 

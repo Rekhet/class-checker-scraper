@@ -59,13 +59,15 @@ two Chromium collectors to the previously successful `ubuntu-24.04` image.
   collected. Cloud SELECT independently confirmed refreshed rows.
 - Cloud `checked_at` (UTC): winter `2026-11-01T09:34:05`, spring
   `2026-11-01T09:34:12`. Both previously stopped at October 23, 13:31 UTC.
-- Counts actual collection remains unverified: the configured enrollment
-  window ended October 20. Cloud and local histories both end at
-  `2026-10-20T23:51:55` KST. Do not force a window to manufacture evidence.
-- Local catalog and public website have not been manually republished. At
-  inspection the local snapshots still held 260/4,929 classes. The next normal
-  `class-checker.update.timer` pass (06:00 KST November 2) must pull and publish
-  the recovered snapshots. `web/` was not changed in this repair.
+- At the original repair inspection the fall enrollment window had ended
+  October 20; cloud/local histories ended `2026-10-20T23:51:55` KST.
+  A subsequent winter rollover (`class-checker/D-000064`, scraper `b0d3cda`)
+  sets winter windows; actual in-window collection remains pending November 2.
+- Original local snapshots held 260/4,929 classes. The later winter rollover
+  refreshed winter locally and published 262 classes (`web` data `56e205d`,
+  public HTTP verified). Spring remains for the normal catalog pull.
+  See `docs/plans/2026-11-01-winter-rollover.md`; this OS repair itself did
+  not change `web/`.
 - Rollback: restore the preceding workflow configuration through a reviewed
   commit if the pin fails; do not remove failure guards or delete cloud data.
 
